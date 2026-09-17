@@ -70,3 +70,39 @@ def test_deep_research_rejects_empty_query(monkeypatch):
         raise AssertionError("consulta vazia deveria gerar ValueError")
 
     assert called is False
+
+
+def test_deep_research_clamps_requested_sources(monkeypatch):
+    limits = []
+    opened = []
+
+    def fake_search(query, limit=5):
+        limits.append(limit)
+        return "\n".join(f"URL: https://example.com/{i}" for i in range(10))
+
+    def fake_open(url):
+        opened.append(url)
+        return "conteúdo"
+
+    monkeypatch.setattr(research, "search_web", fake_search)
+    monkeypatch.setattr(research, "open_webpage", fake_open)
+
+    research.deep_research("teste", sources=99)
+
+    assert limits == [8]
+    assert len(opened) == 5
+
+
+def test_deep_research_enforces_minimum_source_request(monkeypatch):
+    limits = []
+
+    def fake_search(query, limit=5):
+        limits.append(limit)
+        return "URL: https://example.com/a\nURL: https://example.com/b"
+
+    monkeypatch.setattr(research, "search_web", fake_search)
+    monkeypatch.setattr(research, "open_webpage", lambda url: "conteúdo")
+
+    research.deep_research("teste", sources=1)
+
+    assert limits == [5]
