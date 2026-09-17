@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import ast
 import html
+import ipaddress
 import operator
+import socket
 from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
@@ -28,6 +30,7 @@ _UNARY_OPS: dict[type[ast.unaryop], Any] = {
 
 WORKSPACE = Path("workspace").resolve()
 SEARCH_URL = "https://html.duckduckgo.com/html/"
+MAX_PAGE_BYTES = 200_000
 
 
 def calculate(expression: str) -> float | int:
@@ -81,7 +84,7 @@ def write_file(relative_path: str, content: str) -> str:
 
 
 class _SearchParser(HTMLParser):
-    """Extrai resultados da página HTML do DuckDuckGo sem dependências extras."""
+    """Extrai resultados da página HTML do DuckDuckGo."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -130,6 +133,93 @@ class _SearchParser(HTMLParser):
         return url
 
 
+class _PageParser(HTMLParser):
+    """Converte HTML de uma página em texto legível."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.title_parts: list[str] = []
+        self.text_parts: list[str] = []
+        self._title = False
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "title":
+            self._title = True
+        if tag in {"script", "style", "noscript", "svg"}:
+            self._skip += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "title":
+            self._title = False
+        if tag in {"script", "style", "noscript", "svg"} and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data: str) -> None:
+        value = html.unescape(" ".join(data.split())).strip()
+        if not value or self._skip:
+            return
+        if self._title:
+            self.title_parts.append(value)
+        else:
+            self.text_parts.append(value)
+
+
+def _validate_public_url(url: str) -> str:
+    parsed = urlparse(str(url).strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("URL deve usar http ou https")
+    host = parsed.hostname.lower().rstrip(".")
+    if host in {"localhost", "localhost.localdomain"}:
+        raise ValueError("host local não permitido")
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(host, None)}
+    except socket.gaierror as exc:
+        raise ValueError("não foi possível resolver o host") from exc
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if not ip.is_global:
+            raise ValueError("endereço privado ou reservado não permitido")
+    return parsed.geturl()
+
+
+def open_webpage(url: str) -> str:
+    """Abre uma página pública e devolve título + texto, com limite de tamanho."""
+    safe_url = _validate_public_url(url)
+    response = requests.get(
+        safe_url,
+        headers={"User-Agent": "SuperCerebro/1.0"},
+        timeout=20,
+        stream=True,
+    )
+    response.raise_for_status()
+    content_type = response.headers.get("content-type", "").lower()
+    if "text/html" not in content_type and "text/plain" not in content_type:
+        raise ValueError("o recurso não é uma página de texto/HTML")
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=16_384):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > MAX_PAGE_BYTES:
+            break
+        chunks.append(chunk)
+    raw = b"".join(chunks)
+    encoding = response.encoding or "utf-8"
+    text = raw.decode(encoding, errors="replace")
+    if "text/plain" in content_type:
+        body = text
+        title = ""
+    else:
+        parser = _PageParser()
+        parser.feed(text)
+        title = " ".join(parser.title_parts)
+        body = " ".join(parser.text_parts)
+    body = body[:12_000]
+    return f"Título: {title or '(sem título)'}\nURL: {safe_url}\nConteúdo:\n{body}"
+
+
 def search_web(query: str, limit: int = 5) -> str:
     """Pesquisa a web e retorna títulos, URLs e trechos dos resultados."""
     query = str(query).strip()
@@ -166,6 +256,8 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> str:
         return write_file(str(arguments.get("path", "")), str(arguments.get("content", "")))
     if name == "web_search":
         return search_web(str(arguments.get("query", "")), int(arguments.get("limit", 5)))
+    if name == "open_webpage":
+        return open_webpage(str(arguments.get("url", "")))
     raise ValueError(f"ferramenta não permitida: {name}")
 
 
@@ -176,8 +268,9 @@ Ferramentas disponíveis:
 - read_file: lê texto dentro de workspace/. Argumentos: {"path":"arquivo.txt"}
 - write_file: grava texto dentro de workspace/. Argumentos: {"path":"arquivo.txt","content":"..."}
 - web_search: pesquisa informações atuais na web. Argumentos: {"query":"sua pesquisa","limit":5}
+- open_webpage: abre e lê uma página pública encontrada na web. Argumentos: {"url":"https://exemplo.com"}
 
 Para usar uma ferramenta, responda SOMENTE com JSON válido neste formato:
-{"tool":"web_search","arguments":{"query":"notícias atuais sobre tecnologia","limit":5}}
+{"tool":"open_webpage","arguments":{"url":"https://exemplo.com"}}
 Nunca invente o resultado de uma ferramenta. Para resposta normal, não use esse formato.
 """.strip()
