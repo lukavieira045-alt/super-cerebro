@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import requests
 
+from .autonomy import build_autonomy_context
 from .evaluator import judge_with_vireonix, local_check, revision_instruction
 from .goals import Goals
 from .intelligence import build_system_prompt
@@ -21,7 +22,7 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + objetivos + planejamento + aprendizado + ferramentas + juiz interno."""
+    """Vireonix + memória + objetivos + planejamento + autonomia + aprendizado + ferramentas + juiz interno."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
@@ -50,6 +51,9 @@ class SuperCerebro:
                     for goal in related_goals
                 ),
             })
+        autonomy = build_autonomy_context(plan, int(related_goals[0]["id"]) if related_goals else None, MAX_TOOL_STEPS)
+        if autonomy:
+            context.append({"role": "system", "content": autonomy})
         if memory_context:
             context.append({"role": "system", "content": memory_context})
         if learned:
@@ -170,7 +174,8 @@ class SuperCerebro:
             '\n- deep_research: pesquisa várias fontes e reúne conteúdo para comparação. '
             'Argumentos: {"query":"tema a investigar","sources":4}'
             '\n\nPara tarefas complexas, siga o plano inicial, mas ajuste-o conforme os resultados. '
-            'Depois de cada ferramenta, verifique se a próxima etapa é necessária.'
+            'Depois de cada ferramenta, verifique se a próxima etapa é necessária. '
+            'Em modo autônomo, continue executando etapas úteis até concluir ou atingir o limite.'
         )
         messages: list[dict[str, str]] = [
             {"role": "system", "content": build_system_prompt(tool_descriptions)},
