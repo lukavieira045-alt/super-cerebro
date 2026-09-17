@@ -9,6 +9,7 @@ from .autonomy import build_autonomy_context
 from .confidence import estimate, prompt as confidence_prompt
 from .evaluator import judge_with_vireonix, local_check, revision_instruction
 from .evidence import verify_with_model
+from .experience_memory import ExperienceMemory
 from .goals import Goals
 from .intelligence import build_system_prompt
 from .learning import Learning
@@ -26,12 +27,13 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória semântica + objetivos + autonomia + aprendizado + evidências."""
+    """Vireonix + memória + experiências + objetivos + autonomia + aprendizado + evidências."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
         self.memory = memory or Memory()
         self.learning = learning or Learning(self.memory.db_path)
+        self.experiences = ExperienceMemory(self.memory.db_path)
         self.goals = Goals(self.memory.db_path)
         self.improvement = SelfImprovement(self.learning)
         self.messages: list[dict[str, str]] = []
@@ -46,6 +48,7 @@ class SuperCerebro:
             memory_query = text
         memory_context = self.memory.memory_context(memory_query, limit=8)
         learned = self.learning.context(text, limit=5)
+        experience_context = self.experiences.context(text, limit=5)
         goal_context = self.goals.context(limit=5)
         related_goals = self.goals.active_for(text, limit=3)
         plan = make_plan(text)
@@ -61,6 +64,8 @@ class SuperCerebro:
             context.append({"role": "system", "content": memory_context})
         if learned:
             context.append({"role": "system", "content": learned + "\nUse essas experiências como referência, não como verdade absoluta. Reavalie tudo na tarefa atual."})
+        if experience_context:
+            context.append({"role": "system", "content": experience_context})
         context.extend(recent)
         context.append({"role": "user", "content": text})
         return context
@@ -194,6 +199,7 @@ class SuperCerebro:
             reason = "Todas as etapas terminaram com sucesso." if not failures else "; ".join(f"{step.tool}: {step.result[:180]}" for step in failures)
             improvement = self.improvement.analyze(text, [step.__dict__ for step in self.task_engine.steps], success, reason)
             self.improvement.apply(text, strategy, improvement)
+            self.experiences.record(text, strategy, reason, success)
 
         self._update_goals(text, answer)
         self.messages = messages + [{"role": "assistant", "content": answer}]
