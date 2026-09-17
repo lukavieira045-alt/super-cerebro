@@ -59,4 +59,4 @@ def test_brain_uses_safe_context_budget():
     ]
     bounded = SuperCerebro._bounded_messages(messages, 40)
     assert bounded[-1]["content"] == "PEDIDO_ATUAL"
-    assert sum(len(item["content"] for item in bounded)) <= 40
+    assert sum(len(item["content"]) for item in bounded) <= 40
