@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .confidence import estimate
+from .context_budget import bound_messages
 from .contradictions import detect
 from .goals import Goals
 from .knowledge_graph import KnowledgeGraph
@@ -67,6 +68,7 @@ def run_health_checks(db_path: str | Path = "data/health_check.db") -> HealthRep
         _check("Planejador", lambda: _planner_check()),
         _check("Contradições", lambda: _contradiction_check()),
         _check("Confiança", lambda: _confidence_check()),
+        _check("Contexto", lambda: _context_check()),
         _check("Task engine", lambda: _task_engine_check()),
         _check("Ferramenta de cálculo", lambda: _calculator_check()),
     ]
@@ -128,6 +130,20 @@ def _confidence_check() -> str:
     if not 0.0 <= confidence.score <= 1.0:
         raise AssertionError("confiança fora do intervalo")
     return f"confiança OK ({confidence.level})"
+
+
+def _context_check() -> str:
+    messages = [
+        {"role": "system", "content": "S" * 1000},
+        {"role": "assistant", "content": "contexto antigo"},
+        {"role": "user", "content": "pedido atual"},
+    ]
+    bounded = bound_messages(messages, 40, lambda text, limit: text[:limit])
+    if not bounded or bounded[-1]["content"] != "pedido atual":
+        raise AssertionError("mensagem atual foi perdida no orçamento de contexto")
+    if sum(len(item["content"]) for item in bounded) > 40:
+        raise AssertionError("orçamento de contexto excedido")
+    return "orçamento e prioridade OK"
 
 
 def _task_engine_check() -> str:
