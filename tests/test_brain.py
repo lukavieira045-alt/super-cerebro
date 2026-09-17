@@ -129,6 +129,19 @@ def test_brain_records_failed_strategy_in_learning_and_experience(tmp_path):
     assert experiences[0]["success"] == 0
 
 
+def test_brain_uses_learned_strategy_in_vireonix_context(tmp_path):
+    brain = SuperCerebro(memory=Memory(tmp_path / "memory.db"))
+    brain.learning.record("pesquisa web", "buscar fontes oficiais", True)
+    brain.learning.record_experience("pesquisa web", "usar uma única fonte", False, "não foi possível confirmar a informação")
+
+    context = brain._build_context("pesquisa web sobre um assunto atual")
+    system_text = "\n\n".join(item["content"] for item in context if item["role"] == "system")
+
+    assert "buscar fontes oficiais" in system_text
+    assert "usar uma única fonte" in system_text
+    assert "Use essas experiências como referência, não como verdade absoluta" in system_text
+
+
 def test_brain_respects_maximum_tool_steps(tmp_path):
     tool_request = json.dumps({"tool": "calculator", "arguments": {"expression": "1+1"}})
     brain = FakeBrain([tool_request] * 20, tmp_path)
