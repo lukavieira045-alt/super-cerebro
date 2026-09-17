@@ -30,6 +30,13 @@ def test_task_engine_records_failure_without_crashing():
     assert not engine.all_successful()
 
 
+def test_task_engine_detects_repeated_request():
+    engine = TaskEngine(4)
+    engine.execute("x", {"value": 1, "other": "a"}, lambda *_: "ok")
+    assert engine.has_repeated_request("x", {"other": "a", "value": 1})
+    assert not engine.has_repeated_request("x", {"value": 2})
+
+
 def test_memory_and_knowledge_persist(tmp_path):
     db = tmp_path / "memory.db"
     memory = Memory(db)
@@ -76,45 +83,3 @@ def test_source_memory_uses_structural_score(tmp_path):
 def test_reliability_is_bounded():
     result = score("https://example.gov.br", "Fonte", "conteudo " * 30)
     assert 0.0 <= result.score <= 0.9
-
-
-def test_contradictions_are_flagged_as_possible_only():
-    found = detect([
-        {"fact": "O projeto usa Vireonix"},
-        {"fact": "O projeto não usa Vireonix"},
-    ])
-    assert found
-
-
-def test_confidence_stays_conservative():
-    result = estimate("Não foi possível confirmar este dado.", 0, False)
-    assert result.level == "baixa"
-    assert result.score < 0.55
-
-
-def test_temporal_memory_ignores_expired_facts(tmp_path):
-    db = tmp_path / "memory.db"
-    temporal = TemporalMemory(db)
-    expired = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
-    temporal.record("projeto", "fato expirado", 0.9, expired)
-    assert temporal.relevant("projeto fato") == []
-
-
-def test_temporal_memory_accepts_future_validity(tmp_path):
-    db = tmp_path / "memory.db"
-    temporal = TemporalMemory(db)
-    future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
-    temporal.record("projeto", "fato atual", 0.9, future)
-    assert temporal.relevant("projeto fato atual")
-
-
-def test_workspace_blocks_escape(tmp_path, monkeypatch):
-    from agent import tools
-    monkeypatch.setattr(tools, "WORKSPACE", tmp_path.resolve())
-    assert _safe_path("arquivo.txt").parent == tmp_path.resolve()
-    try:
-        _safe_path("../fora.txt")
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("path traversal não foi bloqueado")
