@@ -1,31 +1,57 @@
-const chat=document.getElementById('chat'),message=document.getElementById('message'),send=document.getElementById('send'),newChat=document.getElementById('newChat'),typing=document.getElementById('typing'),brainStage=document.getElementById('brainStage'),brainState=document.getElementById('brainState'),voice=document.getElementById('voice'),canvas=document.getElementById('brainCanvas'),ctx=canvas.getContext('2d');
-const VIREONIX='https://vireonix.ai/v1/chat/completions';let recognition=null,audioContext=null,analyser=null,micStream=null,micData=null,voiceLevel=0,history=[],pulse=0;
+const chat=document.getElementById('chat'),message=document.getElementById('message'),send=document.getElementById('send'),newChat=document.getElementById('newChat'),typing=document.getElementById('typing'),brainStage=document.getElementById('brainStage'),brainState=document.getElementById('brainState'),voice=document.getElementById('voice');
+const VIREONIX='https://vireonix.ai/v1/chat/completions';
+let recognition=null,audioContext=null,micStream=null,history=[];
+
 const visualFix=document.createElement('style');visualFix.textContent=`
 .chat-mode .brain-stage{position:fixed!important;inset:66px 0 0!important;width:100vw!important;height:calc(100dvh - 66px)!important;min-height:0!important;z-index:2!important;pointer-events:none!important;background:radial-gradient(circle at 50% 45%,rgba(2,3,8,.08),rgba(2,3,8,.38) 55%,rgba(2,3,8,.7) 100%)!important}
 .chat-mode .cyber-brain{width:min(96vw,1100px)!important;height:min(82vh,820px)!important;min-height:520px!important;opacity:.62!important;transform:scale(1.05)!important}
-.chat-mode .brain-shell{width:min(88vw,920px)!important;height:min(58vw,600px)!important;min-height:430px!important}
-.chat-mode .brain-state{bottom:6%!important;opacity:.8!important}
 .chat-mode .message-row{position:relative;z-index:25!important}
 .chat-mode .message-row .bubble{backdrop-filter:blur(18px)!important;background:rgba(9,13,24,.88)!important}
 .chat-mode .message-row.user .bubble{background:rgba(23,36,60,.92)!important}
 .chat-mode .chat{background:transparent!important}
-@media(max-width:700px){.chat-mode .cyber-brain{width:120vw!important;height:72vh!important;min-height:470px!important;opacity:.48!important}.chat-mode .brain-shell{width:104vw!important;height:66vw!important;min-height:340px!important}.chat-mode .message-row{max-width:96vw!important}.chat-mode .bubble{max-width:92%!important}}
+@media(max-width:700px){.chat-mode .cyber-brain{width:120vw!important;height:72vh!important;min-height:470px!important;opacity:.48!important}.chat-mode .message-row{max-width:96vw!important}.chat-mode .bubble{max-width:92%!important}}
 `;document.head.appendChild(visualFix);
+
 function setBrainState(s){brainStage.classList.remove('thinking','listening','speaking');if(s)brainStage.classList.add(s);brainState.textContent=({listening:'Ouvindo...',thinking:'Pensando...',speaking:'Falando...'}[s]||'Pronto para pensar')}
 function enterChatMode(){document.body.classList.add('chat-mode');chat.classList.add('has-messages')}
 function addMessage(role,text){enterChatMode();const row=document.createElement('div');row.className=`message-row ${role}`;const box=document.createElement('div');box.className='bubble';const label=document.createElement('div');label.className='message-label';label.textContent=role==='user'?'Você':'Super Cérebro';const content=document.createElement('div');content.textContent=text;box.append(label,content);row.appendChild(box);chat.appendChild(row);requestAnimationFrame(()=>row.scrollIntoView({behavior:'smooth',block:'end'}))}
 function setTyping(on){typing.innerHTML=on?'<span class="typing"><i></i><i></i><i></i></span>':''}
 function speakAnswer(text){if(!('speechSynthesis'in window))return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='pt-BR';u.rate=.98;u.pitch=.95;u.onstart=()=>setBrainState('speaking');u.onend=()=>setBrainState('');u.onerror=()=>setBrainState('');window.speechSynthesis.speak(u)}
-async function fetchWithTimeout(url,options,ms=60000){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),ms);try{return await fetch(url,{...options,signal:controller.signal,cache:'no-store'})}finally{clearTimeout(timer)}}
-async function callVireonix(value){const messages=[{role:'system',content:'Você é o Super Cérebro. Responda em português do Brasil. Raciocine com cuidado, não invente fatos, seja útil e direto. Vireonix é o único cérebro do sistema.'},...history];let lastError=null;for(let attempt=0;attempt<3;attempt++){try{const r=await fetchWithTimeout(VIREONIX,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({model:'auto',messages})},60000);const raw=await r.text();let d={};try{d=raw?JSON.parse(raw):{}}catch{}if(!r.ok){const detail=d?.error?.message||d?.error||raw||`HTTP ${r.status}`;if((r.status===429||r.status>=500)&&attempt<2){await new Promise(x=>setTimeout(x,700*(attempt+1)));continue}throw new Error(`Vireonix HTTP ${r.status}: ${detail}`)}const answer=d?.choices?.[0]?.message?.content;if(!answer)throw new Error('O Vireonix respondeu sem conteúdo.');return answer}catch(e){lastError=e;if(attempt<2&&!(e instanceof TypeError)){await new Promise(x=>setTimeout(x,700*(attempt+1)));continue}if(attempt<2&&e instanceof TypeError){await new Promise(x=>setTimeout(x,900*(attempt+1)));continue}}}throw new Error(lastError?.message||'Falha de conexão com o Vireonix.')}
-async function callBrain(value){return callVireonix(value)}
-async function ask(text){const value=text.trim();if(!value||send.disabled)return;document.getElementById('welcome')?.remove();history.push({role:'user',content:value});if(history.length>20)history=history.slice(-20);addMessage('user',value);message.value='';message.style.height='48px';send.disabled=true;setTyping(true);setBrainState('thinking');pulse=1;try{const answer=await callBrain(value);history.push({role:'assistant',content:answer});if(history.length>20)history=history.slice(-20);addMessage('assistant',answer);speakAnswer(answer)}catch(e){setBrainState('');addMessage('assistant',`Não consegui obter resposta do Vireonix.\n\n${e.message}`)}finally{setTyping(false);send.disabled=false;message.focus()}}
-async function startMicMonitor(){try{audioContext=new(window.AudioContext||window.webkitAudioContext)();micStream=await navigator.mediaDevices.getUserMedia({audio:true});const source=audioContext.createMediaStreamSource(micStream);analyser=audioContext.createAnalyser();analyser.fftSize=256;source.connect(analyser);micData=new Uint8Array(analyser.frequencyBinCount);monitorMic()}catch(e){}}
-function monitorMic(){if(!analyser)return;analyser.getByteTimeDomainData(micData);let sum=0;for(const n of micData){const v=(n-128)/128;sum+=v*v}voiceLevel=Math.min(1,Math.sqrt(sum/micData.length)*4);requestAnimationFrame(monitorMic)}
-function stopMicMonitor(){if(micStream)micStream.getTracks().forEach(t=>t.stop());micStream=null;if(audioContext)audioContext.close().catch(()=>{});audioContext=null;analyser=null;micData=null;voiceLevel=0}
-function startVoice(){const R=window.SpeechRecognition||window.webkitSpeechRecognition;if(!R){addMessage('assistant','Seu navegador não oferece reconhecimento de voz.');return}recognition?.abort();recognition=new R();recognition.lang='pt-BR';recognition.interimResults=true;recognition.continuous=false;voice.classList.add('active');setBrainState('listening');startMicMonitor();recognition.onresult=e=>{let t='';for(let i=e.resultIndex;i<e.results.length;i++)t+=e.results[i][0].transcript;message.value=t;message.dispatchEvent(new Event('input'))};recognition.onend=()=>{voice.classList.remove('active');stopMicMonitor();if(message.value.trim())ask(message.value);else setBrainState('')};recognition.onerror=()=>{voice.classList.remove('active');stopMicMonitor();setBrainState('')};recognition.start()}
-function resize(){const d=Math.min(devicePixelRatio||1,2),r=canvas.getBoundingClientRect();canvas.width=r.width*d;canvas.height=r.height*d;ctx.setTransform(d,0,0,d,0,0)}
-function brainPath(cx,cy,rx,ry){ctx.beginPath();ctx.moveTo(cx,cy-ry);ctx.bezierCurveTo(cx-rx*.2,cy-ry*1.05,cx-rx*.75,cy-ry*.95,cx-rx*.9,cy-ry*.55);ctx.bezierCurveTo(cx-rx*1.08,cy-.05*ry,cx-rx*.92,cy+ry*.55,cx-rx*.55,cy+ry*.72);ctx.bezierCurveTo(cx-rx*.3,cy+ry*.9,cx-rx*.12,cy+ry*.72,cx,cy+ry*.82);ctx.bezierCurveTo(cx+rx*.12,cy+ry*.72,cx+rx*.3,cy+ry*.9,cx+rx*.55,cy+ry*.72);ctx.bezierCurveTo(cx+rx*.92,cy+ry*.55,cx+rx*1.08,cy-.05*ry,cx+rx*.9,cy-ry*.55);ctx.bezierCurveTo(cx+rx*.75,cy-ry*.95,cx+rx*.2,cy-ry*1.05,cx,cy-ry);ctx.closePath()}
-function drawGyrus(cx,cy,rx,ry,side){const paths=[[-.58,-.48,-.2,-.18],[.02,-.57,.46,-.34],[-.68,-.12,-.18,.02],[.05,-.18,.6,-.02],[-.62,.22,-.12,.36],[.08,.2,.64,.38],[-.4,.5,-.08,.65],[.12,.48,.42,.62]];for(const p of paths){ctx.beginPath();ctx.moveTo(cx+side*p[0]*rx,cy+p[1]*ry);ctx.bezierCurveTo(cx+side*p[0]*rx,cy+(p[1]-.12)*ry,cx+side*p[2]*rx,cy+(p[3]-.12)*ry,cx+side*p[2]*rx,cy+p[3]*ry);ctx.bezierCurveTo(cx+side*p[2]*rx,cy+(p[3]+.1)*ry,cx+side*p[0]*rx,cy+(p[1]+.1)*ry,cx+side*p[0]*rx,cy+p[1]*ry);ctx.stroke()}}
-function drawBrain(){const w=canvas.clientWidth,h=canvas.clientHeight;ctx.clearRect(0,0,w,h);const cx=w/2,cy=h*.46,rx=Math.min(w*.36,360),ry=Math.min(h*.34,250);pulse*=.985;const energy=Math.max(voiceLevel,pulse);const glow=ctx.createRadialGradient(cx,cy,10,cx,cy,Math.max(rx,ry)*1.8);glow.addColorStop(0,`rgba(139,92,246,${.28+energy*.22})`);glow.addColorStop(.45,'rgba(34,211,238,.09)');glow.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,w,h);ctx.save();ctx.shadowBlur=28+energy*35;ctx.shadowColor=energy>.1?'#22d3ee':'#8b5cf6';ctx.fillStyle='rgba(12,15,29,.97)';brainPath(cx,cy,rx,ry);ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle=`rgba(34,211,238,${.75+energy*.2})`;ctx.lineWidth=3;brainPath(cx,cy,rx,ry);ctx.stroke();ctx.restore();ctx.save();ctx.strokeStyle=`rgba(196,181,253,${.65+energy*.25})`;ctx.lineWidth=3;ctx.shadowBlur=8;ctx.shadowColor='#8b5cf6';drawGyrus(cx,cy,rx,ry,-1);drawGyrus(cx,cy,rx,ry,1);ctx.shadowBlur=0;ctx.beginPath();ctx.moveTo(cx,cy-ry*.86);ctx.bezierCurveTo(cx-rx*.08,cy-ry*.3,cx+rx*.08,cy+ry*.12,cx,cy+ry*.78);ctx.stroke();ctx.restore();for(let i=0;i<18;i++){const a=i/18*Math.PI*2+performance.now()/3500;const x=cx+Math.cos(a)*rx*(.72+.08*Math.sin(i));const y=cy+Math.sin(a)*ry*(.72+.08*Math.cos(i));ctx.beginPath();ctx.fillStyle=`rgba(34,211,238,${.35+energy*.5})`;ctx.shadowBlur=10;ctx.shadowColor='#22d3ee';ctx.arc(x,y,2.5+energy*3,0,Math.PI*2);ctx.fill()}ctx.shadowBlur=0;requestAnimationFrame(drawBrain)}
-resize();addEventListener('resize',resize);drawBrain();send.onclick=()=>ask(message.value);voice.onclick=startVoice;message.oninput=()=>{message.style.height='48px';message.style.height=`${Math.min(message.scrollHeight,180)}px`};message.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask(message.value)}};document.querySelectorAll('[data-prompt]').forEach(b=>b.onclick=()=>ask(b.dataset.prompt||''));newChat.onclick=()=>{speechSynthesis?.cancel();history=[];location.reload()};
+
+async function callVireonix(value){
+  const messages=[{role:'system',content:'Você é o Super Cérebro. Responda em português do Brasil. Raciocine com cuidado, não invente fatos, seja útil e direto. Vireonix é o único cérebro do sistema.'},...history,{role:'user',content:value}];
+  let lastError='Falha de conexão com o Vireonix.';
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort(),45000);
+      let r;
+      try{
+        r=await fetch(VIREONIX,{method:'POST',mode:'cors',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'auto',messages}) ,signal:controller.signal,cache:'no-store'});
+      }finally{clearTimeout(timer)}
+      const raw=await r.text();
+      let d={};try{d=raw?JSON.parse(raw):{}}catch{}
+      if(!r.ok){
+        const detail=d?.error?.message||d?.error?.type||raw||`HTTP ${r.status}`;
+        lastError=`Vireonix HTTP ${r.status}: ${detail}`;
+        if((r.status===429||r.status>=500)&&attempt<2){await new Promise(x=>setTimeout(x,1000*(attempt+1)));continue}
+        throw new Error(lastError);
+      }
+      const answer=d?.choices?.[0]?.message?.content;
+      if(typeof answer!=='string'||!answer.trim())throw new Error('O Vireonix respondeu sem conteúdo.');
+      return answer.trim();
+    }catch(e){
+      if(e?.name==='AbortError')lastError='O Vireonix demorou mais de 45 segundos para responder.';
+      else if(e instanceof TypeError)lastError='O navegador não conseguiu acessar o endpoint do Vireonix. Se aparecer “Failed to fetch”, o bloqueio está na conexão/CORS do endpoint, não no cérebro visual.';
+      else lastError=e?.message||lastError;
+      if(attempt<2){await new Promise(x=>setTimeout(x,1000*(attempt+1)));continue}
+    }
+  }
+  throw new Error(lastError);
+}
+
+async function ask(text){const value=text.trim();if(!value||send.disabled)return;document.getElementById('welcome')?.remove();addMessage('user',value);message.value='';message.style.height='48px';send.disabled=true;setTyping(true);setBrainState('thinking');try{const answer=await callVireonix(value);history.push({role:'user',content:value},{role:'assistant',content:answer});if(history.length>20)history=history.slice(-20);addMessage('assistant',answer);speakAnswer(answer)}catch(e){addMessage('assistant',`Não consegui conectar ao Vireonix.\n\n${e.message}`);setBrainState('')}finally{setTyping(false);send.disabled=false;message.focus()}}
+
+function startVoice(){const R=window.SpeechRecognition||window.webkitSpeechRecognition;if(!R){addMessage('assistant','Seu navegador não oferece reconhecimento de voz.');return}recognition?.abort();recognition=new R();recognition.lang='pt-BR';recognition.interimResults=true;recognition.continuous=false;voice.classList.add('active');setBrainState('listening');recognition.onresult=e=>{let t='';for(let i=e.resultIndex;i<e.results.length;i++)t+=e.results[i][0].transcript;message.value=t;message.dispatchEvent(new Event('input'))};recognition.onend=()=>{voice.classList.remove('active');if(message.value.trim())ask(message.value);else setBrainState('')};recognition.onerror=()=>{voice.classList.remove('active');setBrainState('')};recognition.start()}
+
+send.onclick=()=>ask(message.value);voice.onclick=startVoice;message.oninput=()=>{message.style.height='48px';message.style.height=`${Math.min(message.scrollHeight,180)}px`};message.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask(message.value)}};document.querySelectorAll('[data-prompt]').forEach(b=>b.onclick=()=>ask(b.dataset.prompt||''));newChat.onclick=()=>{speechSynthesis?.cancel();history=[];location.reload()};
