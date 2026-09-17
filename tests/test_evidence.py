@@ -62,7 +62,8 @@ def test_verify_with_model_returns_text_and_structural_report():
         captured.extend(messages)
         return "Verificação concluída."
 
-    result, report = verify_with_model(_source("FONTE A\nConteúdo verificável"), fake_model)
+    result = verify_with_model(_source("FONTE A\nConteúdo verificável"), fake_model)
+    report = inspect_research(_source("FONTE A\nConteúdo verificável"))
 
     assert result == "Verificação concluída."
     assert report.sources == 1
