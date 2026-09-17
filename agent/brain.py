@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import requests
 
+from .evaluator import evaluate, revision_instruction
 from .intelligence import build_system_prompt
 from .learning import Learning
 from .memory import Memory
@@ -19,7 +20,7 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + planejamento + aprendizado + ferramentas."""
+    """Vireonix + memória + planejamento + aprendizado + ferramentas + avaliação."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
@@ -40,10 +41,7 @@ class SuperCerebro:
         if facts:
             context.append({"role": "system", "content": "Memórias de longo prazo confirmadas:\n" + "\n".join(f"[{item['category']}] {item['fact']}" for item in facts)})
         if learned:
-            context.append({
-                "role": "system",
-                "content": learned + "\nUse essas experiências como referência, não como verdade absoluta. Reavalie tudo na tarefa atual."
-            })
+            context.append({"role": "system", "content": learned + "\nUse essas experiências como referência, não como verdade absoluta. Reavalie tudo na tarefa atual."})
         if relevant_unique:
             context.append({"role": "system", "content": "Conversas anteriores relevantes:\n" + "\n".join(f"{item['role']}: {item['content']}" for item in relevant_unique)})
         context.extend(recent)
@@ -123,6 +121,17 @@ class SuperCerebro:
         except RuntimeError:
             return answer
 
+    def _quality_check(self, messages: list[dict[str, str]], question: str, answer: str) -> str:
+        evaluation = evaluate(question, answer, bool(self.task_engine.steps))
+        if not evaluation.needs_revision:
+            return answer
+        instruction = revision_instruction(evaluation)
+        try:
+            revised = self._call_vireonix(messages + [{"role": "system", "content": instruction}])
+            return revised.strip() or answer
+        except RuntimeError:
+            return answer
+
     def ask(self, text: str) -> str:
         self.task_engine.reset()
         tool_descriptions = TOOL_DESCRIPTIONS + (
@@ -152,6 +161,8 @@ class SuperCerebro:
 
         if self.task_engine.steps:
             answer = self._verify_final(messages, answer)
+
+        answer = self._quality_check(messages, text, answer)
 
         strategy = self.task_engine.strategy_summary()
         if strategy:
