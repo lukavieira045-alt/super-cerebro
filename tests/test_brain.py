@@ -142,6 +142,19 @@ def test_brain_uses_learned_strategy_in_vireonix_context(tmp_path):
     assert "Use essas experiências como referência, não como verdade absoluta" in system_text
 
 
+def test_brain_carries_related_goal_into_vireonix_context(tmp_path):
+    brain = SuperCerebro(memory=Memory(tmp_path / "memory.db"))
+    goal_id = brain.goals.create("Pesquisar e verificar inteligência artificial")
+    brain.goals.update(goal_id, "Pesquisa inicial concluída")
+
+    context = brain._build_context("pesquisar inteligência artificial")
+    system_text = "\n\n".join(item["content"] for item in context if item["role"] == "system")
+
+    assert f"#{goal_id}" in system_text
+    assert "Pesquisa inicial concluída" in system_text
+    assert "MODO AUTÔNOMO ATIVO" in system_text
+
+
 def test_brain_respects_maximum_tool_steps(tmp_path):
     tool_request = json.dumps({"tool": "calculator", "arguments": {"expression": "1+1"}})
     brain = FakeBrain([tool_request] * 20, tmp_path)
