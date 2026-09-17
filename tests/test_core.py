@@ -1,12 +1,14 @@
+from datetime import datetime, timedelta, timezone
+
 from agent.confidence import estimate
 from agent.contradictions import detect
-from agent.evidence import inspect_research
 from agent.knowledge_graph import KnowledgeGraph
 from agent.memory import Memory
 from agent.planner import make_plan
 from agent.source_memory import SourceMemory
 from agent.source_reliability import score
 from agent.task_engine import TaskEngine
+from agent.temporal_memory import TemporalMemory
 from agent.tools import _safe_path, calculate
 
 
@@ -63,6 +65,22 @@ def test_confidence_stays_conservative():
     result = estimate("Não foi possível confirmar este dado.", 0, False)
     assert result.level == "baixa"
     assert result.score < 0.55
+
+
+def test_temporal_memory_ignores_expired_facts(tmp_path):
+    db = tmp_path / "memory.db"
+    temporal = TemporalMemory(db)
+    expired = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    temporal.record("projeto", "fato expirado", 0.9, expired)
+    assert temporal.relevant("projeto fato") == []
+
+
+def test_temporal_memory_accepts_future_validity(tmp_path):
+    db = tmp_path / "memory.db"
+    temporal = TemporalMemory(db)
+    future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    temporal.record("projeto", "fato atual", 0.9, future)
+    assert temporal.relevant("projeto fato atual")
 
 
 def test_workspace_blocks_escape(tmp_path, monkeypatch):
