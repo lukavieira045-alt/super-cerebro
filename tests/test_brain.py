@@ -22,6 +22,9 @@ class FakeBrain(SuperCerebro):
             return "Resposta simulada final."
         return self.replies.pop(0)
 
+    def _build_context(self, text):
+        return [{"role": "user", "content": text}]
+
     def _extract_facts(self, user_text, answer):
         return None
 
