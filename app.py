@@ -1,11 +1,12 @@
-"""Command-line entry point for Super Cérebro."""
+"""Command-line interface for Super Cérebro."""
 
 from agent.brain import build_agent
 
 
 def main() -> None:
-    agent = build_agent()
-    print("Super Cérebro iniciado. Digite 'sair' para encerrar.")
+    brain = build_agent()
+    print("Super Cérebro iniciado com Vireonix Auto.")
+    print("Digite 'sair' para encerrar.")
 
     while True:
         try:
@@ -20,8 +21,11 @@ def main() -> None:
         if not user_input:
             continue
 
-        result = agent.invoke({"messages": [("user", user_input)]})
-        print("\nSuper Cérebro:", result["messages"][-1].content)
+        try:
+            answer = brain.ask(user_input)
+            print("\nSuper Cérebro:", answer)
+        except RuntimeError as exc:
+            print(f"\nErro: {exc}")
 
 
 if __name__ == "__main__":
