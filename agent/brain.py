@@ -6,6 +6,7 @@ import json
 import requests
 
 from .autonomy import build_autonomy_context
+from .confidence import estimate, prompt as confidence_prompt
 from .evaluator import judge_with_vireonix, local_check, revision_instruction
 from .evidence import verify_with_model
 from .goals import Goals
@@ -24,7 +25,7 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + objetivos + autonomia + aprendizado + autoaperfeiçoamento + evidências."""
+    """Vireonix + memória + objetivos + autonomia + aprendizado + autoaperfeiçoamento + evidências + confiança."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
@@ -34,6 +35,7 @@ class SuperCerebro:
         self.improvement = SelfImprovement(self.learning)
         self.messages: list[dict[str, str]] = []
         self.task_engine = TaskEngine(MAX_TOOL_STEPS)
+        self._research_verified = False
 
     def _build_context(self, text: str) -> list[dict[str, str]]:
         recent = self.memory.recent(limit=12)
@@ -126,9 +128,23 @@ class SuperCerebro:
 
     def _verify_research(self, research: str) -> str:
         try:
-            return verify_with_model(research, self._call_vireonix)
+            verified = verify_with_model(research, self._call_vireonix)
+            self._research_verified = True
+            return verified
         except RuntimeError:
+            self._research_verified = False
             return research
+
+    def _calibrate(self, question: str, answer: str) -> str:
+        confidence = estimate(answer, len(self.task_engine.steps), self._research_verified)
+        try:
+            calibrated = self._call_vireonix([
+                {"role": "system", "content": "Você calibra a linguagem de uma resposta sem alterar fatos sustentados."},
+                {"role": "user", "content": f"Pergunta: {question}\n\nResposta:\n{answer}\n\n{confidence_prompt(confidence)}\nReescreva somente se necessário para que o grau de certeza da linguagem seja proporcional às evidências."},
+            ])
+            return calibrated.strip() or answer
+        except RuntimeError:
+            return answer
 
     def _update_goals(self, text: str, answer: str) -> None:
         plan = make_plan(text)
@@ -144,6 +160,7 @@ class SuperCerebro:
 
     def ask(self, text: str) -> str:
         self.task_engine.reset()
+        self._research_verified = False
         tool_descriptions = TOOL_DESCRIPTIONS + ('\n- deep_research: pesquisa várias fontes e reúne conteúdo para comparação. Argumentos: {"query":"tema a investigar","sources":4}\n\nPara tarefas complexas, siga o plano inicial, mas ajuste-o conforme os resultados. Depois de cada ferramenta, verifique se a próxima etapa é necessária. Em modo autônomo, continue executando etapas úteis até concluir ou atingir o limite.')
         messages: list[dict[str, str]] = [{"role": "system", "content": build_system_prompt(tool_descriptions)}, *self._build_context(text)]
         answer = self._call_vireonix(messages)
@@ -163,6 +180,7 @@ class SuperCerebro:
         if self.task_engine.steps:
             answer = self._verify_final(messages, answer)
         answer = self._quality_check(messages, text, answer)
+        answer = self._calibrate(text, answer)
 
         strategy = self.task_engine.strategy_summary()
         if strategy:
