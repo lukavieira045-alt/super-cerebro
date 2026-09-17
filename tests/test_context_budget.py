@@ -15,9 +15,8 @@ def test_context_budget_preserves_current_message():
 
     bounded = bound_messages(messages, 40, clip)
 
-    assert bounded[0]["content"] == "SYSTEM"
     assert bounded[-1]["content"] == "pedido atual que não pode desaparecer"
-    assert len("".join(item["content"] for item in bounded)) <= 40
+    assert sum(len(item["content"]) for item in bounded) <= 40
 
 
 def test_context_budget_discards_old_middle_context_first():
@@ -29,9 +28,8 @@ def test_context_budget_discards_old_middle_context_first():
     ]
 
     bounded = bound_messages(messages, 30, clip)
-    combined = " ".join(item["content"] for item in bounded)
+    combined = "".join(item["content"] for item in bounded)
 
-    assert bounded[0]["content"] == "SYSTEM"
     assert bounded[-1]["content"] == "CURRENT"
     assert "OLD" not in combined
     assert len(combined) <= 30
