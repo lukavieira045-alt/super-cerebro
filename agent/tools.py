@@ -11,7 +11,7 @@ from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import requests
 
@@ -37,6 +37,7 @@ MAX_CONTENT_LENGTH = 100_000
 MAX_QUERY_LENGTH = 1_000
 MAX_URL_LENGTH = 4_000
 MAX_TOOL_ARGUMENTS = 12
+MAX_REDIRECTS = 5
 
 
 def calculate(expression: str) -> float | int:
@@ -206,14 +207,29 @@ def _validate_public_url(url: str) -> str:
 
 
 def open_webpage(url: str) -> str:
-    """Abre uma página pública e devolve título + texto, com limite de tamanho."""
+    """Abre uma página pública e valida cada redirecionamento antes de segui-lo."""
     safe_url = _validate_public_url(url)
-    response = requests.get(
-        safe_url,
-        headers={"User-Agent": "SuperCerebro/1.0"},
-        timeout=20,
-        stream=True,
-    )
+    response = None
+    for redirect_count in range(MAX_REDIRECTS + 1):
+        response = requests.get(
+            safe_url,
+            headers={"User-Agent": "SuperCerebro/1.0"},
+            timeout=20,
+            stream=True,
+            allow_redirects=False,
+        )
+        if response.is_redirect or response.is_permanent_redirect:
+            location = response.headers.get("location")
+            if not location:
+                raise ValueError("redirecionamento sem destino")
+            if redirect_count >= MAX_REDIRECTS:
+                raise ValueError("quantidade máxima de redirecionamentos excedida")
+            safe_url = _validate_public_url(urljoin(safe_url, location))
+            continue
+        break
+    else:
+        raise ValueError("quantidade máxima de redirecionamentos excedida")
+
     response.raise_for_status()
     content_type = response.headers.get("content-type", "").lower()
     if "text/html" not in content_type and "text/plain" not in content_type:
