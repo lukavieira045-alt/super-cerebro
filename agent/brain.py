@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import requests
 
-from .evaluator import evaluate, revision_instruction
+from .evaluator import judge_with_vireonix, local_check, revision_instruction
 from .intelligence import build_system_prompt
 from .learning import Learning
 from .memory import Memory
@@ -20,7 +20,7 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + planejamento + aprendizado + ferramentas + avaliação."""
+    """Vireonix + memória + planejamento + aprendizado + ferramentas + juiz interno."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
@@ -122,12 +122,18 @@ class SuperCerebro:
             return answer
 
     def _quality_check(self, messages: list[dict[str, str]], question: str, answer: str) -> str:
-        evaluation = evaluate(question, answer, bool(self.task_engine.steps))
+        quick = local_check(question, answer, bool(self.task_engine.steps))
+        if quick.needs_revision:
+            try:
+                revised = self._call_vireonix(messages + [{"role": "system", "content": revision_instruction(quick)}])
+                answer = revised.strip() or answer
+            except RuntimeError:
+                pass
+        evaluation = judge_with_vireonix(question, answer, self._call_vireonix)
         if not evaluation.needs_revision:
             return answer
-        instruction = revision_instruction(evaluation)
         try:
-            revised = self._call_vireonix(messages + [{"role": "system", "content": instruction}])
+            revised = self._call_vireonix(messages + [{"role": "assistant", "content": answer}, {"role": "system", "content": revision_instruction(evaluation)}])
             return revised.strip() or answer
         except RuntimeError:
             return answer
@@ -144,7 +150,6 @@ class SuperCerebro:
             {"role": "system", "content": build_system_prompt(tool_descriptions)},
             *self._build_context(text),
         ]
-
         answer = self._call_vireonix(messages)
         for _ in range(MAX_TOOL_STEPS):
             request = self._parse_tool_request(answer)
@@ -161,7 +166,6 @@ class SuperCerebro:
 
         if self.task_engine.steps:
             answer = self._verify_final(messages, answer)
-
         answer = self._quality_check(messages, text, answer)
 
         strategy = self.task_engine.strategy_summary()
@@ -169,9 +173,7 @@ class SuperCerebro:
             success = self.task_engine.all_successful()
             self.learning.record(text, strategy, success)
             failures = [step for step in self.task_engine.steps if not step.ok]
-            reason = "Todas as etapas terminaram com sucesso." if not failures else "; ".join(
-                f"{step.tool}: {step.result[:180]}" for step in failures
-            )
+            reason = "Todas as etapas terminaram com sucesso." if not failures else "; ".join(f"{step.tool}: {step.result[:180]}" for step in failures)
             self.learning.record_experience(text, strategy, success, reason)
 
         self.messages = messages + [{"role": "assistant", "content": answer}]
