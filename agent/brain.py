@@ -111,7 +111,14 @@ class SuperCerebro:
                     timeout=self.timeout,
                 )
                 response.raise_for_status()
-                return response.json()["choices"][0]["message"]["content"]
+                try:
+                    payload = response.json()
+                    content = payload["choices"][0]["message"]["content"]
+                except (ValueError, KeyError, IndexError, TypeError) as exc:
+                    raise RuntimeError(f"Resposta inválida do Vireonix: {exc}") from exc
+                if not isinstance(content, str) or not content.strip():
+                    raise RuntimeError("Resposta inválida do Vireonix: conteúdo vazio")
+                return content
             except requests.HTTPError as exc:
                 last_error = exc
                 status = exc.response.status_code if exc.response is not None else None
@@ -123,6 +130,8 @@ class SuperCerebro:
                     raise RuntimeError(f"Falha ao conectar ao Vireonix: {exc}") from exc
             except requests.RequestException as exc:
                 raise RuntimeError(f"Falha ao conectar ao Vireonix: {exc}") from exc
+            except RuntimeError:
+                raise
             if attempt < VIREONIX_RETRIES:
                 time.sleep(0.5 * (2 ** attempt))
         raise RuntimeError(f"Falha ao conectar ao Vireonix: {last_error}")
