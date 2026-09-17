@@ -1,0 +1,36 @@
+from agent.context_budget import bound_messages
+
+
+def clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit]
+
+
+def test_context_budget_preserves_current_message():
+    messages = [
+        {"role": "system", "content": "SYSTEM"},
+        {"role": "system", "content": "older context " * 20},
+        {"role": "user", "content": "pedido atual que não pode desaparecer"},
+    ]
+
+    bounded = bound_messages(messages, 40, clip)
+
+    assert bounded[0]["content"] == "SYSTEM"
+    assert bounded[-1]["content"] == "pedido atual que não pode desaparecer"
+    assert len("".join(item["content"] for item in bounded)) <= 40
+
+
+def test_context_budget_discards_old_middle_context_first():
+    messages = [
+        {"role": "system", "content": "SYSTEM"},
+        {"role": "system", "content": "OLD " * 30},
+        {"role": "assistant", "content": "RECENT " * 30},
+        {"role": "user", "content": "CURRENT"},
+    ]
+
+    bounded = bound_messages(messages, 30, clip)
+    combined = " ".join(item["content"] for item in bounded)
+
+    assert bounded[0]["content"] == "SYSTEM"
+    assert bounded[-1]["content"] == "CURRENT"
+    assert "OLD" not in combined
+    assert len(combined) <= 30
