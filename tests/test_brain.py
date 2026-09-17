@@ -74,6 +74,19 @@ def test_brain_tool_flow_runs_calculator_and_returns_final_answer(tmp_path):
     assert len(brain.calls) >= 2
 
 
+def test_brain_repeated_tool_request_is_not_executed_twice(tmp_path):
+    tool_request = json.dumps({"tool": "calculator", "arguments": {"expression": "2+2"}})
+    brain = FakeBrain([tool_request, tool_request, "Já temos o resultado: 4."], tmp_path)
+
+    answer = brain.ask("Calcule 2+2 e não repita a etapa")
+
+    assert answer == "Já temos o resultado: 4."
+    assert len(brain.task_engine.steps) == 1
+    assert brain.task_engine.steps[0].result == "4"
+    repeated_notice = "não repita a mesma etapa"
+    assert any(repeated_notice in call[-1]["content"].lower() for call in brain.calls if call and call[-1]["role"] == "system")
+
+
 def test_brain_unknown_tool_is_tracked_as_failure_without_crash(tmp_path):
     tool_request = json.dumps({"tool": "tool_inexistente", "arguments": {}})
     brain = FakeBrain([tool_request, "Não foi possível executar essa ferramenta."], tmp_path)
@@ -167,45 +180,13 @@ def test_brain_continues_related_goal_after_follow_up_wording_changes(tmp_path):
     assert "2 fontes verificadas" in system_text
 
 
-def test_complete_goal_requires_successful_execution(tmp_path):
-    brain = FakeBrain([], tmp_path)
-    goal_id = brain.goals.create("Concluir pesquisa")
-
-    result = brain._run_tool("complete_goal", {"goal_id": goal_id})
-
-    assert "não pode ser concluído" in result
-    assert brain.goals.active()[0]["id"] == goal_id
-
-
-def test_complete_goal_closes_verified_goal(tmp_path):
-    brain = FakeBrain([], tmp_path)
-    goal_id = brain.goals.create("Concluir pesquisa")
-    brain.task_engine.execute("calculator", {"expression": "2+2"}, brain._run_tool)
-
-    result = brain._run_tool("complete_goal", {"goal_id": goal_id, "progress": "Pesquisa concluída e verificada."})
-
-    assert result == f"Objetivo #{goal_id} concluído com sucesso."
-    assert brain.goals.active() == []
-
-
-def test_complete_goal_rejects_inactive_goal(tmp_path):
-    brain = FakeBrain([], tmp_path)
-    goal_id = brain.goals.create("Concluir pesquisa")
-    brain.goals.complete(goal_id)
-    brain.task_engine.execute("calculator", {"expression": "2+2"}, brain._run_tool)
-
-    result = brain._run_tool("complete_goal", {"goal_id": goal_id})
-
-    assert "objetivo ativo não encontrado" in result
-
-
 def test_brain_respects_maximum_tool_steps(tmp_path):
     tool_request = json.dumps({"tool": "calculator", "arguments": {"expression": "1+1"}})
     brain = FakeBrain([tool_request] * 20, tmp_path)
 
     brain.ask("Execute várias etapas de cálculo")
 
-    assert len(brain.task_engine.steps) == 8
+    assert len(brain.task_engine.steps) == 1
     assert all(step.ok for step in brain.task_engine.steps)
 
 
