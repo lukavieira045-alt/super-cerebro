@@ -142,7 +142,7 @@ def test_brain_uses_learned_strategy_in_vireonix_context(tmp_path):
     assert "Use essas experiências como referência, não como verdade absoluta" in system_text
 
 
-def test_brain_carries_related_goal_into_vireonix_context(tmp_path):
+def test_brain_carries_related_goal_progress_into_vireonix_context(tmp_path):
     brain = SuperCerebro(memory=Memory(tmp_path / "memory.db"))
     goal_id = brain.goals.create("Pesquisar e verificar inteligência artificial")
     brain.goals.update(goal_id, "Pesquisa inicial concluída")
@@ -153,6 +153,18 @@ def test_brain_carries_related_goal_into_vireonix_context(tmp_path):
     assert f"#{goal_id}" in system_text
     assert "Pesquisa inicial concluída" in system_text
     assert "MODO AUTÔNOMO ATIVO" in system_text
+
+
+def test_brain_continues_related_goal_after_follow_up_wording_changes(tmp_path):
+    brain = SuperCerebro(memory=Memory(tmp_path / "memory.db"))
+    goal_id = brain.goals.create("Pesquisar fontes oficiais sobre inteligência artificial")
+    brain.goals.update(goal_id, "2 fontes verificadas")
+
+    context = brain._build_context("continue a investigação das fontes oficiais de IA")
+    system_text = "\n\n".join(item["content"] for item in context if item["role"] == "system")
+
+    assert f"#{goal_id}" in system_text
+    assert "2 fontes verificadas" in system_text
 
 
 def test_brain_respects_maximum_tool_steps(tmp_path):
