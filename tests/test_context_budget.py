@@ -1,3 +1,4 @@
+from agent.brain import SuperCerebro
 from agent.context_budget import bound_messages
 
 
@@ -46,3 +47,16 @@ def test_context_budget_keeps_user_when_system_message_exceeds_limit():
 
     assert bounded[-1]["content"] == "PEDIDO_ATUAL"
     assert len("".join(item["content"] for item in bounded)) <= 20
+
+
+def test_brain_uses_safe_context_budget():
+    messages = [
+        {"role": "system", "content": "S" * 1000},
+        {"role": "assistant", "content": "contexto antigo"},
+        {"role": "user", "content": "PEDIDO_ATUAL"},
+    ]
+
+    bounded = SuperCerebro._bounded_messages(messages, 40)
+
+    assert bounded[-1]["content"] == "PEDIDO_ATUAL"
+    assert sum(len(item["content"]) for item in bounded) <= 40
