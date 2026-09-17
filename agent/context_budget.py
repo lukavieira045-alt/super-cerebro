@@ -6,7 +6,7 @@ from typing import Mapping
 
 
 def bound_messages(messages: list[Mapping[str, str]], limit: int, clip) -> list[dict[str, str]]:
-    """Preserva instruções iniciais e a mensagem atual, descartando contexto antigo primeiro."""
+    """Preserva a mensagem atual sempre que ela couber e descarta contexto antigo primeiro."""
     limit = max(1, int(limit))
     normalized = [
         {"role": str(message.get("role", "system")), "content": str(message.get("content", ""))}
@@ -20,16 +20,17 @@ def bound_messages(messages: list[Mapping[str, str]], limit: int, clip) -> list[
     if len(normalized) == 1:
         return [{"role": first["role"], "content": clip(first["content"], limit)}]
 
-    # Sempre reserva uma parte do orçamento para a mensagem atual.
-    last_reserve = min(len(last["content"]), max(1, limit // 4))
-    first_budget = max(0, limit - last_reserve)
-    first_content = clip(first["content"], first_budget)
-    remaining = limit - len(first_content)
-
-    last_budget = min(len(last["content"]), remaining)
+    # A mensagem atual tem prioridade máxima: se couber, preserva seu conteúdo inteiro.
+    last_budget = min(len(last["content"]), limit)
     last_content = clip(last["content"], last_budget)
-    remaining -= len(last_content)
+    remaining = limit - len(last_content)
 
+    # Depois preserva as instruções iniciais, usando somente o espaço restante.
+    first_budget = min(len(first["content"]), remaining)
+    first_content = clip(first["content"], first_budget)
+    remaining -= len(first_content)
+
+    # Por fim, preenche o orçamento com o contexto intermediário mais recente.
     middle: list[dict[str, str]] = []
     if remaining > 0:
         for message in reversed(normalized[1:-1]):
