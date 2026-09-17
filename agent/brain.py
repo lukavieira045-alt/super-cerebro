@@ -12,6 +12,7 @@ from .evaluator import judge_with_vireonix, local_check, revision_instruction
 from .evidence import verify_with_model
 from .experience_memory import ExperienceMemory
 from .goals import Goals
+from .health import HealthReport, run_health_checks
 from .intelligence import build_system_prompt
 from .knowledge_graph import KnowledgeGraph
 from .learning import Learning
@@ -46,6 +47,10 @@ class SuperCerebro:
         self.messages: list[dict[str, str]] = []
         self.task_engine = TaskEngine(MAX_TOOL_STEPS)
         self._research_verified = False
+
+    def health_check(self) -> HealthReport:
+        """Verifica as camadas locais sem fazer chamada automática ao Vireonix."""
+        return run_health_checks(self.memory.db_path)
 
     def _build_context(self, text: str) -> list[dict[str, str]]:
         recent = self.memory.recent(limit=12)
@@ -176,7 +181,10 @@ class SuperCerebro:
                 answer = revised.strip() or answer
             except RuntimeError:
                 pass
-        evaluation = judge_with_vireonix(question, answer, self._call_vireonix)
+        try:
+            evaluation = judge_with_vireonix(question, answer, self._call_vireonix)
+        except RuntimeError:
+            return answer
         if not evaluation.needs_revision:
             return answer
         try:
