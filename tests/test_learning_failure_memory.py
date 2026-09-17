@@ -5,6 +5,7 @@ from agent.self_improvement import SelfImprovement
 def test_failed_strategy_is_not_promoted_to_best(tmp_path):
     learning = Learning(tmp_path / "memory.db")
     learning.record("pesquisar fontes", "buscar na fonte A", False)
+    learning.record_experience("pesquisar fontes", "buscar na fonte A", False, "fonte falhou")
 
     assert learning.best_strategies("pesquisar fontes") == []
     avoided = learning.avoid_strategies("pesquisar fontes")
