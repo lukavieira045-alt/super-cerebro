@@ -31,10 +31,21 @@ _UNARY_OPS: dict[type[ast.unaryop], Any] = {
 WORKSPACE = Path("workspace").resolve()
 SEARCH_URL = "https://html.duckduckgo.com/html/"
 MAX_PAGE_BYTES = 200_000
+MAX_EXPRESSION_LENGTH = 2_000
+MAX_PATH_LENGTH = 500
+MAX_CONTENT_LENGTH = 100_000
+MAX_QUERY_LENGTH = 1_000
+MAX_URL_LENGTH = 4_000
+MAX_TOOL_ARGUMENTS = 12
 
 
 def calculate(expression: str) -> float | int:
     """Calcula aritmética básica sem usar eval()."""
+    expression = str(expression).strip()
+    if not expression:
+        raise ValueError("expressão vazia")
+    if len(expression) > MAX_EXPRESSION_LENGTH:
+        raise ValueError("expressão muito grande")
     tree = ast.parse(expression, mode="eval")
 
     def visit(node: ast.AST) -> float | int:
@@ -61,6 +72,11 @@ def current_datetime() -> str:
 
 
 def _safe_path(relative_path: str) -> Path:
+    relative_path = str(relative_path).strip()
+    if not relative_path:
+        raise ValueError("caminho vazio")
+    if len(relative_path) > MAX_PATH_LENGTH:
+        raise ValueError("caminho muito grande")
     path = (WORKSPACE / relative_path).resolve()
     if path != WORKSPACE and WORKSPACE not in path.parents:
         raise ValueError("caminho fora do workspace permitido")
@@ -72,12 +88,15 @@ def read_file(relative_path: str) -> str:
     path = _safe_path(relative_path)
     if not path.is_file():
         raise FileNotFoundError(f"arquivo não encontrado: {relative_path}")
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8")[:MAX_CONTENT_LENGTH]
 
 
 def write_file(relative_path: str, content: str) -> str:
     """Cria ou substitui um arquivo de texto dentro de workspace/."""
     path = _safe_path(relative_path)
+    content = str(content)
+    if len(content) > MAX_CONTENT_LENGTH:
+        raise ValueError("conteúdo muito grande")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return f"arquivo salvo: {relative_path}"
@@ -166,7 +185,10 @@ class _PageParser(HTMLParser):
 
 
 def _validate_public_url(url: str) -> str:
-    parsed = urlparse(str(url).strip())
+    url = str(url).strip()
+    if not url or len(url) > MAX_URL_LENGTH:
+        raise ValueError("URL vazia ou muito grande")
+    parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("URL deve usar http ou https")
     host = parsed.hostname.lower().rstrip(".")
@@ -225,6 +247,8 @@ def search_web(query: str, limit: int = 5) -> str:
     query = str(query).strip()
     if not query:
         raise ValueError("consulta vazia")
+    if len(query) > MAX_QUERY_LENGTH:
+        raise ValueError("consulta muito grande")
     limit = max(1, min(int(limit), 8))
     response = requests.get(
         SEARCH_URL,
@@ -246,6 +270,10 @@ def search_web(query: str, limit: int = 5) -> str:
 
 def execute_tool(name: str, arguments: dict[str, Any]) -> str:
     """Despacha somente ferramentas explicitamente permitidas."""
+    if not isinstance(arguments, dict):
+        raise ValueError("argumentos inválidos")
+    if len(arguments) > MAX_TOOL_ARGUMENTS:
+        raise ValueError("quantidade de argumentos excedida")
     if name == "calculator":
         return str(calculate(str(arguments.get("expression", ""))))
     if name == "datetime":
