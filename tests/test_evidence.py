@@ -55,16 +55,18 @@ def test_verification_prompt_contains_structural_warnings_and_research():
     assert research in prompt
 
 
-def test_verify_with_model_sends_verification_messages_and_returns_text():
+def test_verify_with_model_returns_text_and_structural_report():
     captured = []
 
     def fake_model(messages):
         captured.extend(messages)
         return "Verificação concluída."
 
-    result = verify_with_model(_source("FONTE A\nConteúdo verificável"), fake_model)
+    result, report = verify_with_model(_source("FONTE A\nConteúdo verificável"), fake_model)
 
     assert result == "Verificação concluída."
+    assert report.sources == 1
+    assert not report.reliable_enough
     assert len(captured) == 2
     assert captured[0]["role"] == "system"
     assert captured[1]["role"] == "user"
