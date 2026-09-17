@@ -215,9 +215,9 @@ class SuperCerebro:
             return answer
 
     def _verify_research(self, research: str) -> str:
-        report = inspect_research(research)
         try:
             verified = verify_with_model(research, self._call_vireonix)
+            report = inspect_research(research)
             # A resposta do Vireonix é uma análise da evidência, mas só marcamos
             # a pesquisa como "verificada" quando a estrutura também sustenta isso:
             # pelo menos duas fontes utilizáveis e nenhum conflito estrutural.
