@@ -167,6 +167,38 @@ def test_brain_continues_related_goal_after_follow_up_wording_changes(tmp_path):
     assert "2 fontes verificadas" in system_text
 
 
+def test_complete_goal_requires_successful_execution(tmp_path):
+    brain = FakeBrain([], tmp_path)
+    goal_id = brain.goals.create("Concluir pesquisa")
+
+    result = brain._run_tool("complete_goal", {"goal_id": goal_id})
+
+    assert "não pode ser concluído" in result
+    assert brain.goals.active()[0]["id"] == goal_id
+
+
+def test_complete_goal_closes_verified_goal(tmp_path):
+    brain = FakeBrain([], tmp_path)
+    goal_id = brain.goals.create("Concluir pesquisa")
+    brain.task_engine.execute("calculator", {"expression": "2+2"}, brain._run_tool)
+
+    result = brain._run_tool("complete_goal", {"goal_id": goal_id, "progress": "Pesquisa concluída e verificada."})
+
+    assert result == f"Objetivo #{goal_id} concluído com sucesso."
+    assert brain.goals.active() == []
+
+
+def test_complete_goal_rejects_inactive_goal(tmp_path):
+    brain = FakeBrain([], tmp_path)
+    goal_id = brain.goals.create("Concluir pesquisa")
+    brain.goals.complete(goal_id)
+    brain.task_engine.execute("calculator", {"expression": "2+2"}, brain._run_tool)
+
+    result = brain._run_tool("complete_goal", {"goal_id": goal_id})
+
+    assert "objetivo ativo não encontrado" in result
+
+
 def test_brain_respects_maximum_tool_steps(tmp_path):
     tool_request = json.dumps({"tool": "calculator", "arguments": {"expression": "1+1"}})
     brain = FakeBrain([tool_request] * 20, tmp_path)
