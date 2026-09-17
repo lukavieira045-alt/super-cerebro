@@ -59,11 +59,10 @@ def verification_prompt(research: str, report: EvidenceReport) -> str:
 def verify_with_model(
     research: str,
     call_model: Callable[[list[dict[str, str]]], str],
-) -> tuple[str, EvidenceReport]:
-    """Entrega o material ao Vireonix e devolve a análise junto do diagnóstico estrutural."""
+) -> str:
+    """Entrega o material ao Vireonix e devolve somente a análise textual."""
     report = inspect_research(research)
-    result = call_model([
+    return call_model([
         {"role": "system", "content": "Você é um verificador de evidências. Seja rigoroso e não invente fontes."},
         {"role": "user", "content": verification_prompt(research, report)},
     ]).strip()
-    return result, report
