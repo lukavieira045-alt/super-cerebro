@@ -36,6 +36,15 @@ class Goals:
     def _normalize(text: str) -> str:
         return re.sub(r"\s+", " ", str(text).strip())[:500]
 
+    @staticmethod
+    def _words(text: str) -> set[str]:
+        return {w.lower() for w in re.findall(r"[\wÀ-ÿ]+", str(text)) if len(w) >= 4}
+
+    @staticmethod
+    def _stems(words: set[str]) -> set[str]:
+        """Cria sinais simples para reconhecer pequenas variações morfológicas em português."""
+        return {word[:6] for word in words if len(word) >= 6}
+
     def create(self, title: str) -> int:
         title = self._normalize(title)
         if not title:
@@ -82,15 +91,18 @@ class Goals:
         return "\n".join(lines)
 
     def active_for(self, text: str, limit: int = 3) -> list[dict[str, Any]]:
-        """Encontra objetivos ativos relacionados à mensagem atual por termos compartilhados."""
-        words = {w.lower() for w in re.findall(r"[\wÀ-ÿ]+", str(text)) if len(w) >= 4}
+        """Encontra objetivos relacionados mesmo com pequenas variações das palavras."""
+        words = self._words(text)
         if not words:
             return []
+        stems = self._stems(words)
         candidates = self.active(20)
         scored: list[tuple[int, int, dict[str, Any]]] = []
         for goal in candidates:
-            goal_words = {w.lower() for w in re.findall(r"[\wÀ-ÿ]+", goal["title"]) if len(w) >= 4}
-            overlap = len(words & goal_words)
+            goal_words = self._words(goal["title"])
+            exact = len(words & goal_words)
+            stem_overlap = len(stems & self._stems(goal_words))
+            overlap = exact * 2 + stem_overlap
             if overlap:
                 scored.append((overlap, int(goal["id"]), goal))
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
