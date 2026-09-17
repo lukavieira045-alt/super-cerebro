@@ -51,7 +51,6 @@ class SuperCerebro:
         self._research_verified = False
 
     def health_check(self) -> HealthReport:
-        """Verifica as camadas locais sem fazer chamada automática ao Vireonix."""
         return run_health_checks(self.memory.db_path)
 
     def _build_context(self, text: str) -> list[dict[str, str]]:
@@ -100,16 +99,10 @@ class SuperCerebro:
         return context
 
     def _call_vireonix(self, messages: list[dict[str, str]]) -> str:
-        """Chama o Vireonix com retry apenas para falhas transitórias."""
         last_error: Exception | None = None
         for attempt in range(VIREONIX_RETRIES + 1):
             try:
-                response = requests.post(
-                    VIREONIX_URL,
-                    headers={"Content-Type": "application/json"},
-                    json={"model": MODEL, "messages": messages},
-                    timeout=self.timeout,
-                )
+                response = requests.post(VIREONIX_URL, headers={"Content-Type": "application/json"}, json={"model": MODEL, "messages": messages}, timeout=self.timeout)
                 response.raise_for_status()
                 try:
                     payload = response.json()
@@ -149,26 +142,9 @@ class SuperCerebro:
             return None
         return data
 
-    def _complete_goal(self, arguments: dict) -> str:
-        """Conclui um objetivo somente após uma execução sem falhas."""
-        try:
-            goal_id = int(arguments.get("goal_id"))
-        except (TypeError, ValueError):
-            return "ERRO DA FERRAMENTA: goal_id inválido"
-        if not self.task_engine.steps or not self.task_engine.all_successful():
-            return "ERRO DA FERRAMENTA: o objetivo não pode ser concluído antes de haver uma execução com todas as etapas bem-sucedidas"
-        active = {int(goal["id"]): goal for goal in self.goals.active(20)}
-        if goal_id not in active:
-            return "ERRO DA FERRAMENTA: objetivo ativo não encontrado"
-        progress = str(arguments.get("progress", "Objetivo concluído após verificação das etapas.")).strip()
-        self.goals.complete(goal_id, progress or "Objetivo concluído após verificação das etapas.")
-        return f"Objetivo #{goal_id} concluído com sucesso."
-
     def _run_tool(self, tool: str, arguments: dict) -> str:
         if tool == "deep_research":
             return deep_research(arguments.get("query", ""), arguments.get("sources", 4))
-        if tool == "complete_goal":
-            return self._complete_goal(arguments)
         return execute_tool(tool, arguments)
 
     def _extract_facts(self, user_text: str, answer: str) -> None:
@@ -250,10 +226,7 @@ class SuperCerebro:
     def _calibrate(self, question: str, answer: str) -> str:
         confidence = estimate(answer, len(self.task_engine.steps), self._research_verified)
         try:
-            calibrated = self._call_vireonix([
-                {"role": "system", "content": "Você calibra a linguagem de uma resposta sem alterar fatos sustentados."},
-                {"role": "user", "content": f"Pergunta: {question}\n\nResposta:\n{answer}\n\n{confidence_prompt(confidence)}\nReescreva somente se necessário para que o grau de certeza da linguagem seja proporcional às evidências."},
-            ])
+            calibrated = self._call_vireonix([{"role": "system", "content": "Você calibra a linguagem de uma resposta sem alterar fatos sustentados."}, {"role": "user", "content": f"Pergunta: {question}\n\nResposta:\n{answer}\n\n{confidence_prompt(confidence)}\nReescreva somente se necessário para que o grau de certeza da linguagem seja proporcional às evidências."}])
             return calibrated.strip() or answer
         except RuntimeError:
             return answer
@@ -273,7 +246,7 @@ class SuperCerebro:
     def ask(self, text: str) -> str:
         self.task_engine.reset()
         self._research_verified = False
-        tool_descriptions = TOOL_DESCRIPTIONS + ('\n- deep_research: pesquisa várias fontes e reúne conteúdo para comparação. Argumentos: {"query":"tema a investigar","sources":4}\n- complete_goal: conclui um objetivo persistente somente depois de uma execução bem-sucedida. Argumentos: {"goal_id":123,"progress":"resultado verificado"}\n\nPara tarefas complexas, siga o plano inicial, mas ajuste-o conforme os resultados. Depois de cada ferramenta, verifique se a próxima etapa é necessária. Só use complete_goal quando houver evidência de que o objetivo foi realmente cumprido. Em modo autônomo, continue executando etapas úteis até concluir ou atingir o limite.')
+        tool_descriptions = TOOL_DESCRIPTIONS + ('\n- deep_research: pesquisa várias fontes e reúne conteúdo para comparação. Argumentos: {"query":"tema a investigar","sources":4}\n\nPara tarefas complexas, siga o plano inicial, mas ajuste-o conforme os resultados. Depois de cada ferramenta, verifique se a próxima etapa é necessária. Em modo autônomo, continue executando etapas úteis até concluir ou atingir o limite.')
         messages: list[dict[str, str]] = [{"role": "system", "content": build_system_prompt(tool_descriptions)}, *self._build_context(text)]
         answer = self._call_vireonix(messages)
         for _ in range(MAX_TOOL_STEPS):
@@ -282,19 +255,22 @@ class SuperCerebro:
                 break
             tool = request["tool"]
             arguments = request["arguments"]
+            if self.task_engine.has_repeated_request(tool, arguments):
+                messages.extend([{"role": "assistant", "content": answer}, {"role": "system", "content": f"A ferramenta {tool} com esses mesmos argumentos já foi executada. Não repita a mesma etapa. Escolha uma etapa diferente, use o resultado existente ou conclua a tarefa."}])
+                answer = self._call_vireonix(messages)
+                continue
             result = self.task_engine.execute(tool, arguments, self._run_tool)
             if tool == "deep_research" and result:
                 self._remember_sources(result, arguments.get("query", text))
                 evidence = self._verify_research(result)
                 result = result + "\n\nVERIFICAÇÃO DAS EVIDÊNCIAS:\n" + evidence
-            messages.extend([{ "role": "assistant", "content": answer}, {"role": "system", "content": f"Resultado da ferramenta {tool}:\n{result}\n\nHistórico:\n{self.task_engine.trace_text()}\n\nContinue seguindo ou ajustando o plano. Verifique o resultado antes da próxima etapa."}])
+            messages.extend([{"role": "assistant", "content": answer}, {"role": "system", "content": f"Resultado da ferramenta {tool}:\n{result}\n\nHistórico:\n{self.task_engine.trace_text()}\n\nContinue seguindo ou ajustando o plano. Verifique o resultado antes da próxima etapa."}])
             answer = self._call_vireonix(messages)
 
         if self.task_engine.steps:
             answer = self._verify_final(messages, answer)
         answer = self._quality_check(messages, text, answer)
         answer = self._calibrate(text, answer)
-
         strategy = self.task_engine.strategy_summary()
         if strategy:
             success = self.task_engine.all_successful()
@@ -303,7 +279,6 @@ class SuperCerebro:
             improvement = self.improvement.analyze(text, [step.__dict__ for step in self.task_engine.steps], success, reason)
             self.improvement.apply(text, strategy, improvement)
             self.experiences.record(text, strategy, reason, success)
-
         self._update_goals(text, answer)
         self.messages = messages + [{"role": "assistant", "content": answer}]
         self.memory.add("user", text)
