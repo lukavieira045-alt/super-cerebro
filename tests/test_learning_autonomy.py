@@ -61,3 +61,21 @@ def test_goal_progress_persists_for_follow_up(tmp_path):
     assert active
     assert active[0]["id"] == goal_id
     assert active[0]["progress"] == "Pesquisa inicial concluída"
+
+
+def test_goal_completion_removes_goal_from_active_context(tmp_path):
+    goals = Goals(tmp_path / "goals.db")
+    goal_id = goals.create("Concluir projeto de pesquisa")
+    goals.update(goal_id, "Todas as etapas foram verificadas")
+
+    goals.complete(goal_id)
+
+    assert goals.active() == []
+    with_completed = goals._connect()
+    try:
+        row = with_completed.execute("SELECT status, progress FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    finally:
+        with_completed.close()
+
+    assert row["status"] == "completed"
+    assert row["progress"] == "Concluído."
