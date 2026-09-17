@@ -6,7 +6,7 @@ from typing import Mapping
 
 
 def bound_messages(messages: list[Mapping[str, str]], limit: int, clip) -> list[dict[str, str]]:
-    """Preserva a mensagem atual sempre que ela couber e descarta contexto antigo primeiro."""
+    """Preserva a mensagem atual e mantém o orçamento estritamente limitado."""
     limit = max(1, int(limit))
     normalized = [
         {"role": str(message.get("role", "system")), "content": str(message.get("content", ""))}
@@ -15,31 +15,39 @@ def bound_messages(messages: list[Mapping[str, str]], limit: int, clip) -> list[
     if not normalized:
         return []
 
+    def safe_clip(text: str, budget: int) -> str:
+        budget = max(0, int(budget))
+        if budget <= 0:
+            return ""
+        result = str(clip(text, budget))
+        return result if len(result) <= budget else result[:budget]
+
     first = normalized[0]
     last = normalized[-1]
     if len(normalized) == 1:
-        return [{"role": first["role"], "content": clip(first["content"], limit)}]
+        return [{"role": first["role"], "content": safe_clip(first["content"], limit)}]
 
-    # A mensagem atual tem prioridade máxima: se couber, preserva seu conteúdo inteiro.
+    # A mensagem atual tem prioridade máxima. Se couber, ela é preservada inteira.
     last_budget = min(len(last["content"]), limit)
-    last_content = clip(last["content"], last_budget)
+    last_content = safe_clip(last["content"], last_budget)
     remaining = limit - len(last_content)
 
-    # Depois preserva as instruções iniciais, usando somente o espaço restante.
+    # Depois preservamos o início das instruções do sistema.
     first_budget = min(len(first["content"]), remaining)
-    first_content = clip(first["content"], first_budget)
+    first_content = safe_clip(first["content"], first_budget)
     remaining -= len(first_content)
 
-    # Por fim, preenche o orçamento com o contexto intermediário mais recente.
+    # O espaço restante é preenchido pelo contexto intermediário mais recente.
     middle: list[dict[str, str]] = []
     if remaining > 0:
         for message in reversed(normalized[1:-1]):
             if remaining <= 0:
                 break
             budget = min(len(message["content"]), remaining)
-            content = clip(message["content"], budget)
-            middle.append({"role": message["role"], "content": content})
-            remaining -= len(content)
+            content = safe_clip(message["content"], budget)
+            if content:
+                middle.append({"role": message["role"], "content": content})
+                remaining -= len(content)
         middle.reverse()
 
     result: list[dict[str, str]] = []
