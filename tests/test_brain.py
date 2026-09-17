@@ -203,6 +203,21 @@ def test_brain_evaluator_failure_is_non_fatal(tmp_path, monkeypatch):
     assert answer == "Resposta que deve continuar disponível."
 
 
+def test_brain_research_verification_returns_text_and_sets_structural_flag(tmp_path, monkeypatch):
+    brain = FakeBrain(["Análise verificada."], tmp_path)
+    source_a = "FONTE A\n" + ("conteúdo verificável " * 20)
+    source_b = "FONTE B\n" + ("outro conteúdo verificável " * 20)
+    research = source_a + "\n---\n" + source_b
+
+    monkeypatch.setattr("agent.brain.verify_with_model", lambda research, call_model: "Análise verificada.")
+
+    result = brain._verify_research(research)
+
+    assert isinstance(result, str)
+    assert result == "Análise verificada."
+    assert brain._research_verified is True
+
+
 def test_vireonix_retries_connection_error_then_succeeds(monkeypatch, tmp_path):
     brain = SuperCerebro(timeout=3, memory=Memory(tmp_path / "memory.db"))
     calls = []
