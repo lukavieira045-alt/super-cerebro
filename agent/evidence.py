@@ -35,7 +35,6 @@ def inspect_research(research: str) -> EvidenceReport:
     if any("Não foi possível abrir esta fonte" in block for block in blocks):
         warnings.append("uma ou mais fontes não puderam ser abertas")
 
-    # Sinaliza divergências explícitas sem tentar decidir qual fonte está correta.
     if re.search(r"\b(?:porém|por outro lado|diverge|contradiz|diferente de)\b", research, re.I):
         conflicts.append("o material contém sinais de divergência entre fontes")
 
@@ -60,10 +59,11 @@ def verification_prompt(research: str, report: EvidenceReport) -> str:
 def verify_with_model(
     research: str,
     call_model: Callable[[list[dict[str, str]]], str],
-) -> str:
-    """Entrega o material ao Vireonix para verificação final das evidências."""
+) -> tuple[str, EvidenceReport]:
+    """Entrega o material ao Vireonix e devolve a análise junto do diagnóstico estrutural."""
     report = inspect_research(research)
-    return call_model([
+    result = call_model([
         {"role": "system", "content": "Você é um verificador de evidências. Seja rigoroso e não invente fontes."},
         {"role": "user", "content": verification_prompt(research, report)},
     ]).strip()
+    return result, report
