@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from agent.confidence import estimate
 from agent.contradictions import detect
 from agent.knowledge_graph import KnowledgeGraph
+from agent.learning import Learning
 from agent.memory import Memory
 from agent.planner import make_plan
 from agent.source_memory import SourceMemory
@@ -38,6 +39,30 @@ def test_memory_and_knowledge_persist(tmp_path):
     graph = KnowledgeGraph(db)
     graph.add("Projeto", "usa", "Vireonix", 0.9)
     assert graph.related("Projeto Vireonix")
+
+
+def test_learning_tracks_success_and_failure_history(tmp_path):
+    db = tmp_path / "learning.db"
+    learning = Learning(db)
+    learning.record("pesquisa web", "buscar fontes oficiais", True)
+    learning.record("pesquisa web", "buscar fontes oficiais", False)
+    learning.record("pesquisa web", "buscar fontes oficiais", True)
+    item = learning.relevant("pesquisa web")[0]
+    assert item["uses"] == 3
+    assert item["successes"] == 2
+    assert item["failures"] == 1
+    assert learning.best_strategies("pesquisa web")
+
+
+def test_learning_failure_can_change_strategy_status(tmp_path):
+    db = tmp_path / "learning.db"
+    learning = Learning(db)
+    learning.record("tarefa", "estrategia", True)
+    learning.record("tarefa", "estrategia", False)
+    item = learning.relevant("tarefa")[0]
+    assert item["success"] == 0
+    assert item["successes"] == 1
+    assert item["failures"] == 1
 
 
 def test_source_memory_uses_structural_score(tmp_path):
