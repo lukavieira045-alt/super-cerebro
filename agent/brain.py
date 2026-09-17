@@ -6,6 +6,7 @@ import json
 import requests
 
 from .intelligence import build_system_prompt
+from .learning import Learning
 from .memory import Memory
 from .research import deep_research
 from .task_engine import TaskEngine
@@ -17,11 +18,12 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória persistente + ferramentas + orquestração."""
+    """Vireonix + memória + aprendizado + ferramentas + orquestração."""
 
-    def __init__(self, timeout: int = 120, memory: Memory | None = None) -> None:
+    def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
         self.memory = memory or Memory()
+        self.learning = learning or Learning(self.memory.db_path)
         self.messages: list[dict[str, str]] = []
         self.task_engine = TaskEngine(MAX_TOOL_STEPS)
 
@@ -29,11 +31,14 @@ class SuperCerebro:
         recent = self.memory.recent(limit=12)
         relevant = self.memory.relevant(text, limit=6)
         facts = self.memory.relevant_facts(text, limit=8)
+        learned = self.learning.context(text, limit=5)
         seen = {(item["role"], item["content"]) for item in recent}
         relevant_unique = [item for item in relevant if (item["role"], item["content"]) not in seen]
         context: list[dict[str, str]] = []
         if facts:
             context.append({"role": "system", "content": "Memórias de longo prazo confirmadas:\n" + "\n".join(f"[{item['category']}] {item['fact']}" for item in facts)})
+        if learned:
+            context.append({"role": "system", "content": learned + "\nUse essas estratégias como referência, não como verdade absoluta. Verifique se continuam adequadas à tarefa atual."})
         if relevant_unique:
             context.append({"role": "system", "content": "Conversas anteriores relevantes:\n" + "\n".join(f"{item['role']}: {item['content']}" for item in relevant_unique)})
         context.extend(recent)
@@ -99,7 +104,7 @@ class SuperCerebro:
             return
 
     def _verify_final(self, messages: list[dict[str, str]], answer: str) -> str:
-        """Pede ao próprio Vireonix uma revisão final baseada apenas nas evidências."""
+        """Pede ao próprio Vireonix uma revisão final baseada nas evidências."""
         trace = self.task_engine.trace_text()
         verification = (
             "VERIFICAÇÃO FINAL DA TAREFA.\n"
@@ -116,7 +121,7 @@ class SuperCerebro:
             return answer
 
     def ask(self, text: str) -> str:
-        """Resolve uma tarefa, encadeia ferramentas e verifica a resposta final."""
+        """Resolve tarefas, reutilizando estratégias aprendidas e verificando a resposta final."""
         self.task_engine.reset()
         tool_descriptions = TOOL_DESCRIPTIONS + (
             '\n- deep_research: pesquisa várias fontes, abre as fontes encontradas e reúne o conteúdo para comparação. '
@@ -145,6 +150,10 @@ class SuperCerebro:
 
         if self.task_engine.steps:
             answer = self._verify_final(messages, answer)
+
+        strategy = self.task_engine.strategy_summary()
+        if strategy:
+            self.learning.record(text, strategy, self.task_engine.all_successful())
 
         self.messages = messages + [{"role": "assistant", "content": answer}]
         self.memory.add("user", text)
