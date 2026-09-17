@@ -7,6 +7,7 @@ import requests
 
 from .intelligence import build_system_prompt
 from .memory import Memory
+from .research import deep_research
 from .tools import TOOL_DESCRIPTIONS, execute_tool
 
 VIREONIX_URL = "https://vireonix.ai/v1/chat/completions"
@@ -92,8 +93,12 @@ class SuperCerebro:
 
     def ask(self, text: str) -> str:
         """Resolve a tarefa e executa ferramentas locais quando necessário."""
+        tool_descriptions = TOOL_DESCRIPTIONS + (
+            '\n- deep_research: pesquisa várias fontes, abre as fontes encontradas e reúne o conteúdo para comparação. '
+            'Argumentos: {"query":"tema a investigar","sources":4}'
+        )
         messages: list[dict[str, str]] = [
-            {"role": "system", "content": build_system_prompt(TOOL_DESCRIPTIONS)},
+            {"role": "system", "content": build_system_prompt(tool_descriptions)},
             *self._build_context(text),
         ]
 
@@ -103,7 +108,11 @@ class SuperCerebro:
             if request is None:
                 break
             try:
-                result = execute_tool(request["tool"], request["arguments"])
+                if request["tool"] == "deep_research":
+                    args = request["arguments"]
+                    result = deep_research(args.get("query", ""), args.get("sources", 4))
+                else:
+                    result = execute_tool(request["tool"], request["arguments"])
             except Exception as exc:
                 result = f"ERRO DA FERRAMENTA: {exc}"
             messages.extend([
