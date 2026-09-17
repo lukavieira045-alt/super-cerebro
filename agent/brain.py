@@ -12,6 +12,7 @@ from .evidence import verify_with_model
 from .experience_memory import ExperienceMemory
 from .goals import Goals
 from .intelligence import build_system_prompt
+from .knowledge_graph import KnowledgeGraph
 from .learning import Learning
 from .memory import Memory
 from .planner import format_plan, make_plan
@@ -27,13 +28,14 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + experiências + objetivos + autonomia + aprendizado + evidências."""
+    """Vireonix + memória + experiências + grafo + objetivos + autonomia + aprendizado + evidências."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
         self.memory = memory or Memory()
         self.learning = learning or Learning(self.memory.db_path)
         self.experiences = ExperienceMemory(self.memory.db_path)
+        self.knowledge = KnowledgeGraph(self.memory.db_path)
         self.goals = Goals(self.memory.db_path)
         self.improvement = SelfImprovement(self.learning)
         self.messages: list[dict[str, str]] = []
@@ -49,6 +51,7 @@ class SuperCerebro:
         memory_context = self.memory.memory_context(memory_query, limit=8)
         learned = self.learning.context(text, limit=5)
         experience_context = self.experiences.context(text, limit=5)
+        knowledge_context = self.knowledge.context(text, limit=8)
         goal_context = self.goals.context(limit=5)
         related_goals = self.goals.active_for(text, limit=3)
         plan = make_plan(text)
@@ -66,6 +69,8 @@ class SuperCerebro:
             context.append({"role": "system", "content": learned + "\nUse essas experiências como referência, não como verdade absoluta. Reavalie tudo na tarefa atual."})
         if experience_context:
             context.append({"role": "system", "content": experience_context})
+        if knowledge_context:
+            context.append({"role": "system", "content": knowledge_context})
         context.extend(recent)
         context.append({"role": "user", "content": text})
         return context
@@ -107,6 +112,18 @@ class SuperCerebro:
             for item in facts[:5]:
                 if isinstance(item, dict) and item.get("fact"):
                     self.memory.remember_fact(str(item.get("category", "geral")), str(item["fact"]), int(item.get("importance", 2)))
+        except (RuntimeError, KeyError, IndexError, TypeError, ValueError):
+            return
+
+    def _extract_knowledge(self, user_text: str, answer: str) -> None:
+        prompt = ("Extraia somente relações factuais duradouras e úteis. Não invente. Não extraia opiniões, senhas, tokens, chaves, dados bancários ou informações extremamente sensíveis. Responda SOMENTE JSON em uma lista no formato [{\"subject\":\"...\",\"relation\":\"...\",\"object\":\"...\",\"confidence\":0.8}]. Se não houver relações úteis, responda [].\n\n" f"Mensagem: {user_text}\nResposta: {answer}")
+        try:
+            edges = json.loads(self._call_vireonix([{"role": "system", "content": "Você é um extrator conservador de relações de conhecimento."}, {"role": "user", "content": prompt}]))
+            if not isinstance(edges, list):
+                return
+            for item in edges[:8]:
+                if isinstance(item, dict) and item.get("subject") and item.get("relation") and item.get("object"):
+                    self.knowledge.add(str(item["subject"]), str(item["relation"]), str(item["object"]), float(item.get("confidence", 0.7)))
         except (RuntimeError, KeyError, IndexError, TypeError, ValueError):
             return
 
@@ -206,6 +223,7 @@ class SuperCerebro:
         self.memory.add("user", text)
         self.memory.add("assistant", answer)
         self._extract_facts(text, answer)
+        self._extract_knowledge(text, answer)
         self.memory.retain()
         return answer
 
