@@ -17,7 +17,7 @@ STOPWORDS = {
 
 
 class Memory:
-    """Memória SQLite com histórico, fatos e recuperação contextual ponderada."""
+    """Memória SQLite com histórico, fatos e retenção de longo prazo."""
 
     def __init__(self, db_path: str | Path = "data/memory.db") -> None:
         self.db_path = Path(db_path)
@@ -35,6 +35,9 @@ class Memory:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
+                importance INTEGER NOT NULL DEFAULT 1,
+                access_count INTEGER NOT NULL DEFAULT 0,
+                last_accessed_at TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )""")
             db.execute("""CREATE TABLE IF NOT EXISTS facts (
@@ -45,6 +48,15 @@ class Memory:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )""")
+            self._ensure_column(db, "memories", "importance", "INTEGER NOT NULL DEFAULT 1")
+            self._ensure_column(db, "memories", "access_count", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(db, "memories", "last_accessed_at", "TEXT")
+
+    @staticmethod
+    def _ensure_column(db: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in columns:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     @staticmethod
     def _terms(text: str) -> set[str]:
@@ -55,7 +67,7 @@ class Memory:
         }
 
     @classmethod
-    def _score(cls, query: str, content: str, importance: int = 0) -> float:
+    def _score(cls, query: str, content: str, importance: int = 0, access_count: int = 0) -> float:
         query_terms = cls._terms(query)
         content_terms = cls._terms(content)
         if not query_terms or not content_terms:
@@ -65,11 +77,16 @@ class Memory:
             return 0.0
         coverage = len(overlap) / len(query_terms)
         density = len(overlap) / max(1, len(content_terms))
-        return coverage * 10 + density * 2 + max(0, min(5, int(importance))) * 0.5
+        importance_bonus = max(0, min(5, int(importance))) * 0.5
+        access_bonus = min(1.5, max(0, int(access_count)) * 0.1)
+        return coverage * 10 + density * 2 + importance_bonus + access_bonus
 
-    def add(self, role: str, content: str) -> None:
+    def add(self, role: str, content: str, importance: int = 1) -> None:
         with self._connect() as db:
-            db.execute("INSERT INTO memories (role, content) VALUES (?, ?)", (role, content))
+            db.execute(
+                "INSERT INTO memories (role, content, importance) VALUES (?, ?, ?)",
+                (role, content, max(1, min(5, int(importance)))),
+            )
 
     def recent(self, limit: int = 12) -> list[dict[str, str]]:
         with self._connect() as db:
@@ -77,17 +94,23 @@ class Memory:
         return [dict(row) for row in reversed(rows)]
 
     def relevant(self, text: str, limit: int = 6) -> list[dict[str, str]]:
-        """Recupera lembranças por relevância lexical, não apenas por uma palavra igual."""
+        """Recupera lembranças por relevância e reforça memórias reutilizadas."""
         with self._connect() as db:
-            rows = db.execute("SELECT id, role, content FROM memories ORDER BY id DESC LIMIT 500").fetchall()
+            rows = db.execute("SELECT id, role, content, importance, access_count FROM memories ORDER BY id DESC LIMIT 1000").fetchall()
         scored: list[tuple[float, int, dict[str, str]]] = []
         for row in rows:
             item = {"role": row["role"], "content": row["content"]}
-            score = self._score(text, item["content"])
+            score = self._score(text, item["content"], row["importance"], row["access_count"])
             if score > 0:
                 scored.append((score, int(row["id"]), item))
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return list(reversed([item for _, _, item in scored[:limit]]))
+        selected = list(reversed([item for _, _, item in scored[:limit]]))
+        if selected:
+            contents = [item["content"] for item in selected]
+            with self._connect() as db:
+                for content in contents:
+                    db.execute("UPDATE memories SET access_count = access_count + 1, last_accessed_at = CURRENT_TIMESTAMP WHERE content = ?", (content,))
+        return selected
 
     def remember_fact(self, category: str, fact: str, importance: int = 2) -> None:
         fact = fact.strip()
@@ -135,6 +158,23 @@ class Memory:
                 f"- {item['role']}: {item['content']}" for item in memories
             ))
         return "\n\n".join(parts)
+
+    def retain(self, max_memories: int = 3000) -> int:
+        """Remove apenas memórias antigas e pouco úteis, preservando as importantes."""
+        max_memories = max(100, int(max_memories))
+        with self._connect() as db:
+            count = int(db.execute("SELECT COUNT(*) AS total FROM memories").fetchone()["total"])
+            if count <= max_memories:
+                return 0
+            excess = count - max_memories
+            rows = db.execute("""SELECT id FROM memories
+                ORDER BY (importance * 4 + MIN(access_count, 10) + CASE WHEN last_accessed_at IS NULL THEN 0 ELSE 2 END) ASC, id ASC
+                LIMIT ?""", (excess,)).fetchall()
+            ids = [int(row["id"]) for row in rows]
+            if not ids:
+                return 0
+            db.executemany("DELETE FROM memories WHERE id = ?", [(item,) for item in ids])
+            return len(ids)
 
     def clear(self) -> None:
         with self._connect() as db:
