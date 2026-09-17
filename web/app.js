@@ -1,5 +1,5 @@
 const chat=document.getElementById('chat'),message=document.getElementById('message'),send=document.getElementById('send'),newChat=document.getElementById('newChat'),typing=document.getElementById('typing'),brainStage=document.getElementById('brainStage'),brainState=document.getElementById('brainState'),voice=document.getElementById('voice');
-const GATEWAY='/api/chat';
+const GATEWAY='https://super-cerebro.hatchable.site/api/chat';
 let recognition=null,history=[],speakTimer=null;
 
 const visualFix=document.createElement('style');visualFix.textContent=`
