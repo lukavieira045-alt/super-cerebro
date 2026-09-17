@@ -1,139 +1,15 @@
-const chat = document.getElementById('chat');
-const message = document.getElementById('message');
-const send = document.getElementById('send');
-const newChat = document.getElementById('newChat');
-const typing = document.getElementById('typing');
-const brainStage = document.getElementById('brainStage');
-const brainState = document.getElementById('brainState');
-const voice = document.getElementById('voice');
-
-let recognition = null;
-let speakingTimer = null;
-
-function setBrainState(state) {
-  brainStage.classList.remove('thinking', 'listening', 'speaking');
-  if (state) brainStage.classList.add(state);
-  const labels = { listening: 'Ouvindo...', thinking: 'Pensando...', speaking: 'Falando...' };
-  brainState.textContent = labels[state] || 'Pronto para pensar';
-}
-
-function addMessage(role, text) {
-  const row = document.createElement('div');
-  row.className = `message-row ${role}`;
-  const box = document.createElement('div');
-  box.className = 'bubble';
-  const label = document.createElement('div');
-  label.className = 'message-label';
-  label.textContent = role === 'user' ? 'Você' : 'Super Cérebro';
-  const content = document.createElement('div');
-  content.textContent = text;
-  box.append(label, content);
-  row.appendChild(box);
-  chat.appendChild(row);
-  row.scrollIntoView({ behavior: 'smooth', block: 'end' });
-}
-
-function setTyping(active) {
-  typing.innerHTML = active ? '<span class="typing"><i></i><i></i><i></i></span>' : '';
-}
-
-function speakAnswer(text) {
-  if (!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = 'pt-BR';
-  utterance.rate = 1;
-  utterance.pitch = 1;
-  utterance.onstart = () => setBrainState('speaking');
-  utterance.onend = () => setBrainState('');
-  utterance.onerror = () => setBrainState('');
-  window.speechSynthesis.speak(utterance);
-}
-
-async function ask(text) {
-  const value = text.trim();
-  if (!value || send.disabled) return;
-  const welcome = document.getElementById('welcome');
-  if (welcome) welcome.remove();
-  addMessage('user', value);
-  message.value = '';
-  message.style.height = '42px';
-  send.disabled = true;
-  setTyping(true);
-  setBrainState('thinking');
-
-  try {
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: value })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-    const answer = data.answer || 'Não recebi uma resposta válida.';
-    addMessage('assistant', answer);
-    speakAnswer(answer);
-  } catch (error) {
-    setBrainState('');
-    addMessage('assistant', `Não consegui conectar ao núcleo agora. ${error.message}`);
-  } finally {
-    setTyping(false);
-    send.disabled = false;
-    message.focus();
-  }
-}
-
-function startVoice() {
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Recognition) {
-    addMessage('assistant', 'Seu navegador não oferece reconhecimento de voz nesta versão.');
-    return;
-  }
-  if (recognition) recognition.abort();
-  recognition = new Recognition();
-  recognition.lang = 'pt-BR';
-  recognition.interimResults = true;
-  recognition.continuous = false;
-  voice.classList.add('active');
-  setBrainState('listening');
-  recognition.onresult = (event) => {
-    let transcript = '';
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      transcript += event.results[i][0].transcript;
-    }
-    message.value = transcript;
-    message.dispatchEvent(new Event('input'));
-  };
-  recognition.onend = () => {
-    voice.classList.remove('active');
-    setBrainState('');
-    if (message.value.trim()) ask(message.value);
-  };
-  recognition.onerror = () => {
-    voice.classList.remove('active');
-    setBrainState('');
-  };
-  recognition.start();
-}
-
-send.addEventListener('click', () => ask(message.value));
-voice.addEventListener('click', startVoice);
-message.addEventListener('input', () => {
-  message.style.height = '42px';
-  message.style.height = `${Math.min(message.scrollHeight, 150)}px`;
-});
-message.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    ask(message.value);
-  }
-});
-document.querySelectorAll('[data-prompt]').forEach((button) => {
-  button.addEventListener('click', () => ask(button.dataset.prompt || ''));
-});
-newChat.addEventListener('click', () => {
-  window.speechSynthesis?.cancel();
-  window.location.reload();
-});
-
-void speakingTimer;
+const chat=document.getElementById('chat');const message=document.getElementById('message');const send=document.getElementById('send');const newChat=document.getElementById('newChat');const typing=document.getElementById('typing');const brainStage=document.getElementById('brainStage');const brainState=document.getElementById('brainState');const voice=document.getElementById('voice');const canvas=document.getElementById('brainCanvas');const ctx=canvas.getContext('2d');let recognition=null;let audioContext=null;let analyser=null;let micStream=null;let micData=null;let voiceLevel=0;let particles=[];let rotation=0;let targetRotation=0;let raf=0;
+function setBrainState(state){brainStage.classList.remove('thinking','listening','speaking');if(state)brainStage.classList.add(state);brainState.textContent=({listening:'Ouvindo...',thinking:'Pensando...',speaking:'Falando...'}[state]||'Pronto para pensar')}
+function addMessage(role,text){const row=document.createElement('div');row.className=`message-row ${role}`;const box=document.createElement('div');box.className='bubble';const label=document.createElement('div');label.className='message-label';label.textContent=role==='user'?'Você':'Super Cérebro';const content=document.createElement('div');content.textContent=text;box.append(label,content);row.appendChild(box);chat.appendChild(row);row.scrollIntoView({behavior:'smooth',block:'end'})}
+function setTyping(active){typing.innerHTML=active?'<span class="typing"><i></i><i></i><i></i></span>':''}
+function speakAnswer(text){if(!('speechSynthesis'in window))return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='pt-BR';u.rate=1;u.pitch=1;u.onstart=()=>setBrainState('speaking');u.onend=()=>setBrainState('');u.onerror=()=>setBrainState('');window.speechSynthesis.speak(u)}
+async function ask(text){const value=text.trim();if(!value||send.disabled)return;document.getElementById('welcome')?.remove();addMessage('user',value);message.value='';message.style.height='48px';send.disabled=true;setTyping(true);setBrainState('thinking');try{const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:value})});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);const answer=data.answer||'Não recebi uma resposta válida.';addMessage('assistant',answer);speakAnswer(answer)}catch(error){setBrainState('');const text=location.hostname.includes('github.io')?'A interface está funcionando, mas o núcleo Python ainda não está publicado neste endereço. O /api/chat precisa de um servidor para responder.':`Não consegui conectar ao núcleo agora. ${error.message}`;addMessage('assistant',text)}finally{setTyping(false);send.disabled=false;message.focus()}}
+async function startMicMonitor(){try{audioContext=new(window.AudioContext||window.webkitAudioContext)();micStream=await navigator.mediaDevices.getUserMedia({audio:true});const source=audioContext.createMediaStreamSource(micStream);analyser=audioContext.createAnalyser();analyser.fftSize=256;source.connect(analyser);micData=new Uint8Array(analyser.frequencyBinCount);monitorMic()}catch(e){}}
+function monitorMic(){if(!analyser)return;analyser.getByteTimeDomainData(micData);let sum=0;for(const n of micData){const v=(n-128)/128;sum+=v*v}voiceLevel=Math.min(1,Math.sqrt(sum/micData.length)*4);requestAnimationFrame(monitorMic)}
+function stopMicMonitor(){if(micStream)micStream.getTracks().forEach(t=>t.stop());micStream=null;if(audioContext)audioContext.close().catch(()=>{});audioContext=null;analyser=null;micData=null;voiceLevel=0}
+function startVoice(){const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Recognition){addMessage('assistant','Seu navegador não oferece reconhecimento de voz nesta versão.');return}if(recognition)recognition.abort();recognition=new Recognition();recognition.lang='pt-BR';recognition.interimResults=true;recognition.continuous=false;voice.classList.add('active');setBrainState('listening');startMicMonitor();recognition.onresult=e=>{let transcript='';for(let i=e.resultIndex;i<e.results.length;i++)transcript+=e.results[i][0].transcript;message.value=transcript;message.dispatchEvent(new Event('input'))};recognition.onend=()=>{voice.classList.remove('active');stopMicMonitor();setBrainState('');if(message.value.trim())ask(message.value)};recognition.onerror=()=>{voice.classList.remove('active');stopMicMonitor();setBrainState('')};recognition.start()}
+function resize(){const dpr=Math.min(devicePixelRatio||1,2);const r=canvas.getBoundingClientRect();canvas.width=r.width*dpr;canvas.height=r.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);createParticles(r.width,r.height)}
+function createParticles(w,h){particles=[];const count=Math.max(850,Math.min(1700,Math.floor(w*h/180)));for(let i=0;i<count;i++){const side=Math.random()<.5?-1:1;const x=(Math.random()-.5)*1.7;const y=(Math.random()-.5)*1.45;const z=(Math.random()-.5)*1.05;const lobe=Math.exp(-((x*1.05)**2+(y*.95)**2));if(Math.random()>lobe*.92+.08)continue;const ridge=Math.sin(y*11+x*3)+Math.sin(x*9-y*4);particles.push({x:x*side,y,z,side,phase:Math.random()*Math.PI*2,ridge,size:.7+Math.random()*1.8})}}
+function project(p,w,h){const ca=Math.cos(rotation),sa=Math.sin(rotation);let x=p.x*ca-p.z*sa;let z=p.x*sa+p.z*ca;const scale=1/(2.05-z*.48);return{x:w/2+x*w*.31*scale,y:h/2+p.y*h*.34*scale,z,scale}}
+function drawBrain(){const w=canvas.clientWidth,h=canvas.clientHeight;ctx.clearRect(0,0,w,h);rotation+=.0035+voiceLevel*.018;targetRotation+=voiceLevel*.003;const glow=ctx.createRadialGradient(w/2,h/2,20,w/2,h/2,Math.min(w,h)*.44);glow.addColorStop(0,`rgba(139,92,246,${.20+voiceLevel*.18})`);glow.addColorStop(.45,'rgba(34,211,238,.08)');glow.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,w,h);const projected=particles.map(p=>({p,q:project(p,w,h)})).sort((a,b)=>a.q.z-b.q.z);for(const item of projected){const p=item.p,q=item.q;const wave=Math.sin(p.ridge*2+rotation*3+p.phase)*.035;const alpha=.18+(.5+q.z/2)*.52+voiceLevel*.2;const hue=p.side<0?'270':'190';ctx.beginPath();ctx.fillStyle=`hsla(${hue},90%,${64+voiceLevel*20}%,${Math.max(.12,Math.min(.95,alpha))})`;ctx.shadowBlur=voiceLevel>0?.6:3;ctx.shadowColor=hue==='270'?'#8b5cf6':'#22d3ee';const r=p.size*q.scale*(1+wave+voiceLevel*.8);ctx.arc(q.x,q.y,r,0,Math.PI*2);ctx.fill()}ctx.shadowBlur=0;raf=requestAnimationFrame(drawBrain)}
+resize();window.addEventListener('resize',resize);drawBrain();send.addEventListener('click',()=>ask(message.value));voice.addEventListener('click',startVoice);message.addEventListener('input',()=>{message.style.height='48px';message.style.height=`${Math.min(message.scrollHeight,180)}px`});message.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask(message.value)}});document.querySelectorAll('[data-prompt]').forEach(b=>b.addEventListener('click',()=>ask(b.dataset.prompt||'')));newChat.addEventListener('click',()=>{window.speechSynthesis?.cancel();location.reload()});
