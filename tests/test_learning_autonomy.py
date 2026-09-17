@@ -79,3 +79,13 @@ def test_goal_completion_removes_goal_from_active_context(tmp_path):
 
     assert row["status"] == "completed"
     assert row["progress"] == "Concluído."
+
+
+def test_active_for_recognizes_word_variations(tmp_path):
+    goals = Goals(tmp_path / "goals.db")
+    goal_id = goals.create("Pesquisar e verificar inteligência artificial")
+
+    related = goals.active_for("pesquisa sobre inteligência artificial")
+
+    assert related
+    assert related[0]["id"] == goal_id
