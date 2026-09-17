@@ -34,3 +34,15 @@ def test_context_budget_discards_old_middle_context_first():
     assert bounded[-1]["content"] == "CURRENT"
     assert "OLD" not in combined
     assert len(combined) <= 30
+
+
+def test_context_budget_keeps_user_when_system_message_exceeds_limit():
+    messages = [
+        {"role": "system", "content": "S" * 1000},
+        {"role": "user", "content": "PEDIDO_ATUAL"},
+    ]
+
+    bounded = bound_messages(messages, 20, clip)
+
+    assert bounded[-1]["content"] == "PEDIDO_ATUAL"
+    assert len("".join(item["content"] for item in bounded)) <= 20
