@@ -37,3 +37,14 @@ def test_self_improvement_records_failure_as_avoidance(tmp_path):
 
     assert learning.best_strategies("pesquisar fontes") == []
     assert learning.avoid_strategies("pesquisar fontes")[0]["strategy"] == "deep_research=erro"
+
+
+def test_relevant_experiences_exposes_boolean_success_flags(tmp_path):
+    learning = Learning(tmp_path / "memory.db")
+    learning.record_experience("pesquisar fontes", "estrategia", False, "falhou")
+    learning.record_experience("pesquisar fontes", "outra estrategia", True, "funcionou")
+
+    experiences = learning.relevant_experiences("pesquisar fontes")
+
+    assert experiences
+    assert all(isinstance(item["success"], bool) for item in experiences)
