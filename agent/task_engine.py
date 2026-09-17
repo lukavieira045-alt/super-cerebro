@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -26,6 +27,21 @@ class TaskEngine:
 
     def reset(self) -> None:
         self.steps.clear()
+
+    def has_repeated_request(self, tool: str, arguments: dict[str, Any]) -> bool:
+        """Detecta uma solicitação idêntica já executada para evitar loops improdutivos."""
+        try:
+            target = json.dumps(arguments, sort_keys=True, ensure_ascii=False)
+        except (TypeError, ValueError):
+            target = repr(arguments)
+        for step in self.steps:
+            try:
+                previous = json.dumps(step.arguments, sort_keys=True, ensure_ascii=False)
+            except (TypeError, ValueError):
+                previous = repr(step.arguments)
+            if step.tool == tool and previous == target:
+                return True
+        return False
 
     def execute(
         self,
