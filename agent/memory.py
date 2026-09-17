@@ -94,7 +94,7 @@ class Memory:
         return [dict(row) for row in reversed(rows)]
 
     def relevant(self, text: str, limit: int = 6) -> list[dict[str, str]]:
-        """Recupera lembranças por relevância e reforça memórias reutilizadas."""
+        """Recupera lembranças por relevância e reforça somente os registros selecionados."""
         with self._connect() as db:
             rows = db.execute("SELECT id, role, content, importance, access_count FROM memories ORDER BY id DESC LIMIT 1000").fetchall()
         scored: list[tuple[float, int, dict[str, str]]] = []
@@ -104,12 +104,15 @@ class Memory:
             if score > 0:
                 scored.append((score, int(row["id"]), item))
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        selected = list(reversed([item for _, _, item in scored[:limit]]))
-        if selected:
-            contents = [item["content"] for item in selected]
+        selected_rows = scored[:max(1, int(limit))]
+        selected = list(reversed([item for _, _, item in selected_rows]))
+        selected_ids = [memory_id for _, memory_id, _ in selected_rows]
+        if selected_ids:
             with self._connect() as db:
-                for content in contents:
-                    db.execute("UPDATE memories SET access_count = access_count + 1, last_accessed_at = CURRENT_TIMESTAMP WHERE content = ?", (content,))
+                db.executemany(
+                    "UPDATE memories SET access_count = access_count + 1, last_accessed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [(memory_id,) for memory_id in selected_ids],
+                )
         return selected
 
     def remember_fact(self, category: str, fact: str, importance: int = 2) -> None:
