@@ -37,10 +37,22 @@ function loadTesseract(){
   return tesseractPromise;
 }
 
+async function prepareImage(file){
+  const bitmap=await createImageBitmap(file);
+  const max=2400,scale=Math.min(1,max/Math.max(bitmap.width,bitmap.height));
+  const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
+  const img=ctx.getImageData(0,0,canvas.width,canvas.height),d=img.data;
+  for(let i=0;i<d.length;i+=4){const y=.299*d[i]+.587*d[i+1]+.114*d[i+2];const v=y<150?Math.max(0,y-12):Math.min(255,y+10);d[i]=d[i+1]=d[i+2]=v}
+  ctx.putImageData(img,0,0);
+  return canvas;
+}
+
 async function readImageText(file){
-  const T=await loadTesseract();setBrainState('thinking');
-  const result=await T.recognize(file,'por+eng',{logger:m=>{if(m.status==='recognizing text'&&typeof m.progress==='number'){brainState.textContent=`Lendo imagem... ${Math.round(m.progress*100)}%`}}});
-  return (result?.data?.text||'').replace(/\n{3,}/g,'\n\n').trim();
+  const T=await loadTesseract();setBrainState('thinking');brainState.textContent='Preparando leitura do print...';
+  let source=file;try{source=await prepareImage(file)}catch{}
+  const result=await T.recognize(source,'por+eng',{logger:m=>{if(m.status==='loading language data')brainState.textContent='Carregando idioma do leitor...';else if(m.status==='recognizing text'&&typeof m.progress==='number')brainState.textContent=`Lendo imagem... ${Math.round(m.progress*100)}%`}});
+  return (result?.data?.text||'').replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
 }
 
 async function ask(text){
@@ -49,8 +61,10 @@ async function ask(text){
   addMessage('user',hasImage?`🖼️ ${imageName}${value?'\n'+value:''}`:value);message.value='';message.style.height='48px';send.disabled=true;setTyping(true);setBrainState('thinking');
   try{
     let context='';
-    if(imageForRead){let ocr='';try{ocr=await readImageText(imageForRead)}catch(e){ocr=''}
-      context=`O usuário enviou uma imagem/print. Trate o conteúdo abaixo como texto extraído da imagem por OCR. Analise com atenção e explique em português do Brasil, com detalhes, o que aparece escrito, organizando títulos, avisos, números, datas, botões, erros e instruções quando existirem. Não invente palavras que o OCR não encontrou. Se houver trecho duvidoso, marque como [trecho possivelmente incorreto]. Se o usuário não fez uma pergunta específica, faça primeiro uma descrição clara do que o print mostra e depois explique o significado de cada parte.\n\nNOME DO ARQUIVO: ${imageName}\n\nTEXTO EXTRAÍDO DO PRINT:\n${ocr||'[Não foi possível extrair texto da imagem. Informe que a leitura automática falhou e peça um print mais nítido.]'}`;
+    if(imageForRead){
+      let ocr='';let ocrError='';
+      try{ocr=await readImageText(imageForRead)}catch(e){ocrError=e?.message||'falha desconhecida'}
+      context=`ATENÇÃO: O usuário enviou um print/imagem. Você NÃO deve responder que não consegue visualizar imagens. A imagem foi processada localmente por OCR e o texto extraído está abaixo. Responda usando esse texto como a fonte do conteúdo visível. Explique em português do Brasil, com detalhes e sem inventar. Identifique títulos, mensagens, avisos, números, datas, nomes, botões, campos, erros e instruções. Preserve valores e palavras importantes. Se algum trecho estiver incompleto ou estranho, marque como [trecho possivelmente incorreto] e explique o que ainda dá para concluir. Se o usuário não fez uma pergunta específica, primeiro diga claramente o que o print mostra e depois explique cada parte.\n\nNOME DO ARQUIVO: ${imageName}\n\nTEXTO EXTRAÍDO DO PRINT:\n${ocr||'[OCR não conseguiu extrair texto desta imagem. Não diga que você não pode visualizar imagens; informe apenas que a leitura automática falhou e peça um print mais nítido ou com maior resolução.]'}${ocrError?'\n\nDETALHE TÉCNICO DO OCR (não precisa mostrar ao usuário): '+ocrError:''}`;
     }
     const answer=await callVireonix(value||'Leia e explique este print detalhadamente.',context);
     history.push({role:'user',content:context?`${value||'Leia e explique este print detalhadamente.'}\n${context}`:value},{role:'assistant',content:answer});if(history.length>30)history=history.slice(-30);
