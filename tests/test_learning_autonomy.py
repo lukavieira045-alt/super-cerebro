@@ -89,3 +89,24 @@ def test_active_for_recognizes_word_variations(tmp_path):
 
     assert related
     assert related[0]["id"] == goal_id
+
+
+def test_explicit_completion_phrase_is_required():
+    assert Goals.is_explicit_completion("objetivo concluído")
+    assert Goals.is_explicit_completion("pode finalizar esse objetivo")
+    assert Goals.is_explicit_completion("conclua este objetivo")
+    assert not Goals.is_explicit_completion("continue esse objetivo")
+    assert not Goals.is_explicit_completion("acho que terminamos")
+
+
+def test_complete_active_only_closes_related_goal_on_explicit_command(tmp_path):
+    goals = Goals(tmp_path / "goals.db")
+    goal_id = goals.create("Concluir projeto de pesquisa")
+
+    assert goals.complete_active("continue o projeto") is None
+    assert goals.active()[0]["id"] == goal_id
+
+    completed_id = goals.complete_active("pode finalizar esse objetivo")
+
+    assert completed_id == goal_id
+    assert goals.active() == []
