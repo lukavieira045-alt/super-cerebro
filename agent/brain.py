@@ -325,3 +325,8 @@ class SuperCerebro:
         self._extract_knowledge(text, answer)
         self.memory.retain()
         return answer
+
+
+def build_agent(timeout: int = 120) -> SuperCerebro:
+    """Factory pública usada pela CLI e pelos testes."""
+    return SuperCerebro(timeout=timeout)
