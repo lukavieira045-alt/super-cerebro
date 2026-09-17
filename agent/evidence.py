@@ -35,7 +35,11 @@ def inspect_research(research: str) -> EvidenceReport:
     if any("Não foi possível abrir esta fonte" in block for block in blocks):
         warnings.append("uma ou mais fontes não puderam ser abertas")
 
-    if re.search(r"\b(?:porém|por outro lado|diverge|contradiz|diferente de)\b", research, re.I):
+    # Marcadores como "porém" podem aparecer naturalmente dentro de uma única
+    # fonte. Só tratamos isso como sinal estrutural de conflito quando há mais
+    # de uma fonte e o marcador aparece em uma fonte posterior à primeira.
+    conflict_pattern = re.compile(r"\b(?:porém|por outro lado|diverge|contradiz|diferente de)\b", re.I)
+    if len(blocks) >= 2 and any(conflict_pattern.search(block) for block in blocks[1:]):
         conflicts.append("o material contém sinais de divergência entre fontes")
 
     return EvidenceReport(len(blocks), len(usable), tuple(conflicts), tuple(warnings))
