@@ -17,6 +17,7 @@ from .knowledge_graph import KnowledgeGraph
 from .learning import Learning
 from .memory import Memory
 from .planner import format_plan, make_plan
+from .provenance import Provenance
 from .research import deep_research
 from .self_improvement import SelfImprovement
 from .semantic_memory import expand_query
@@ -30,7 +31,7 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + experiências + grafo + tempo + contradições + autonomia."""
+    """Vireonix + memória + experiências + grafo + tempo + proveniência + contradições + autonomia."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
@@ -39,6 +40,7 @@ class SuperCerebro:
         self.experiences = ExperienceMemory(self.memory.db_path)
         self.knowledge = KnowledgeGraph(self.memory.db_path)
         self.temporal = TemporalMemory(self.memory.db_path)
+        self.provenance = Provenance(self.memory.db_path)
         self.goals = Goals(self.memory.db_path)
         self.improvement = SelfImprovement(self.learning)
         self.messages: list[dict[str, str]] = []
@@ -56,6 +58,7 @@ class SuperCerebro:
         experience_context = self.experiences.context(text, limit=5)
         knowledge_context = self.knowledge.context(text, limit=8)
         temporal_context = self.temporal.context(text, limit=6)
+        provenance_context = self.provenance.context(text, limit=6)
         goal_context = self.goals.context(limit=5)
         related_goals = self.goals.active_for(text, limit=3)
         try:
@@ -81,6 +84,8 @@ class SuperCerebro:
             context.append({"role": "system", "content": knowledge_context})
         if temporal_context:
             context.append({"role": "system", "content": temporal_context})
+        if provenance_context:
+            context.append({"role": "system", "content": provenance_context})
         if facts_context:
             context.append({"role": "system", "content": facts_context})
         context.extend(recent)
@@ -123,7 +128,11 @@ class SuperCerebro:
                 return
             for item in facts[:5]:
                 if isinstance(item, dict) and item.get("fact"):
-                    self.memory.remember_fact(str(item.get("category", "geral")), str(item["fact"]), int(item.get("importance", 2)))
+                    category = str(item.get("category", "geral"))
+                    fact = str(item["fact"])
+                    importance = int(item.get("importance", 2))
+                    self.memory.remember_fact(category, fact, importance)
+                    self.provenance.record(category, fact, "modelo", "Vireonix: extração de memória", min(1.0, max(0.0, importance / 5)))
         except (RuntimeError, KeyError, IndexError, TypeError, ValueError):
             return
 
@@ -135,8 +144,13 @@ class SuperCerebro:
                 return
             for item in edges[:8]:
                 if isinstance(item, dict) and item.get("subject") and item.get("relation") and item.get("object"):
-                    self.knowledge.add(str(item["subject"]), str(item["relation"]), str(item["object"]), float(item.get("confidence", 0.7)))
-                    self.temporal.record(str(item["subject"]), f"{item['relation']} = {item['object']}", float(item.get("confidence", 0.7)))
+                    subject = str(item["subject"])
+                    relation = str(item["relation"])
+                    obj = str(item["object"])
+                    confidence = float(item.get("confidence", 0.7))
+                    self.knowledge.add(subject, relation, obj, confidence)
+                    self.temporal.record(subject, f"{relation} = {obj}", confidence)
+                    self.provenance.record(subject, f"{relation} = {obj}", "modelo", "Vireonix: extração de conhecimento", confidence)
         except (RuntimeError, KeyError, IndexError, TypeError, ValueError):
             return
 
