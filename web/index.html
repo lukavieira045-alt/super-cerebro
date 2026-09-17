@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#070b14">
+  <meta name="theme-color" content="#05070d">
   <title>Super Cérebro</title>
   <link rel="stylesheet" href="/web/style.css">
 </head>
@@ -11,7 +11,7 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <div class="brain-logo" aria-hidden="true">✦</div>
+        <div class="brain-mini" aria-hidden="true">🧠</div>
         <div>
           <h1>Super Cérebro</h1>
           <span><i class="status-dot"></i> Vireonix conectado</span>
@@ -21,10 +21,19 @@
     </header>
 
     <main id="chat" class="chat" aria-live="polite">
-      <section class="welcome">
-        <div class="welcome-orb">✦</div>
+      <section id="brainStage" class="brain-stage" aria-label="Cérebro interativo">
+        <div class="brain-halo"></div>
+        <div class="brain-core">
+          <div class="brain-glow"></div>
+          <div class="brain-shape" aria-hidden="true">🧠</div>
+          <div class="brain-pulse p1"></div><div class="brain-pulse p2"></div><div class="brain-pulse p3"></div>
+        </div>
+        <div class="brain-state" id="brainState">Pronto para pensar</div>
+      </section>
+
+      <section id="welcome" class="welcome">
         <h2>Como posso ajudar?</h2>
-        <p>Converse com o Super Cérebro. Ele usa o Vireonix como núcleo de inteligência.</p>
+        <p>Fale ou escreva. O cérebro reage à conversa e o chat ocupa toda a tela.</p>
         <div class="quick-actions">
           <button data-prompt="Explique como você organiza uma tarefa complexa.">🧠 Explicar</button>
           <button data-prompt="Pesquise e compare informações sobre inteligência artificial.">🔎 Pesquisar</button>
@@ -36,7 +45,8 @@
 
     <footer class="composer-wrap">
       <div class="composer">
-        <textarea id="message" rows="1" maxlength="20000" placeholder="Digite sua mensagem..." aria-label="Mensagem"></textarea>
+        <button id="voice" class="voice-button" aria-label="Falar com o Super Cérebro" title="Falar">🎙️</button>
+        <textarea id="message" rows="1" maxlength="20000" placeholder="Mensagem para o Super Cérebro..." aria-label="Mensagem"></textarea>
         <button id="send" class="send-button" aria-label="Enviar">➤</button>
       </div>
       <div class="composer-meta">
