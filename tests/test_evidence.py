@@ -4,7 +4,8 @@ from agent.evidence import inspect_research, verification_prompt, verify_with_mo
 
 
 def _source(text: str) -> str:
-    return text + " " * max(0, 120 - len(text))
+    # Preenche com conteúdo real, pois inspect_research remove espaços nas bordas.
+    return text + " conteúdo adicional para teste de evidência." * 8
 
 
 def test_inspect_research_warns_when_there_are_too_few_usable_sources():
