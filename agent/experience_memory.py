@@ -52,21 +52,28 @@ class ExperienceMemory:
         if not task or not strategy:
             return
         with self._connect() as db:
-            db.execute("""INSERT INTO task_experiences (task, strategy, result, success)
-                VALUES (?, ?, ?, ?)""", (task, strategy, result, int(success)))
-            db.execute("""DELETE FROM task_experiences
-                WHERE id NOT IN (SELECT id FROM task_experiences ORDER BY id DESC LIMIT 500)""")
+            db.execute(
+                "INSERT INTO task_experiences (task, strategy, result, success) VALUES (?, ?, ?, ?)",
+                (task, strategy, result, int(success)),
+            )
+            db.execute(
+                "DELETE FROM task_experiences WHERE id NOT IN (SELECT id FROM task_experiences ORDER BY id DESC LIMIT 500)"
+            )
 
     def relevant(self, task: str, limit: int = 5) -> list[dict[str, Any]]:
         with self._connect() as db:
-            rows = db.execute("SELECT id, task, strategy, result, success, uses FROM task_experiences ORDER BY id DESC LIMIT 500").fetchall()
+            rows = db.execute(
+                "SELECT id, task, strategy, result, success, uses FROM task_experiences ORDER BY id DESC LIMIT 500"
+            ).fetchall()
         ranked: list[tuple[float, dict[str, Any]]] = []
         for row in rows:
             item = dict(row)
             similarity = self._similarity(task, item["task"])
             if similarity <= 0:
                 continue
-            score = similarity * 10 + (2.0 if item["success"] else -1.5) + min(2.0, item["uses"] * 0.1)
+            # `uses` is retained for schema compatibility, but is not used as a
+            # ranking signal because historical rows are independent experiences.
+            score = similarity * 10 + (2.0 if item["success"] else -1.5)
             ranked.append((score, item))
         ranked.sort(key=lambda x: x[0], reverse=True)
         return [item for _, item in ranked[:max(1, limit)]]
