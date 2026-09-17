@@ -97,6 +97,48 @@ def test_brain_tool_failure_does_not_stop_final_response(tmp_path):
     assert "ERRO" in brain.task_engine.steps[0].result
 
 
+def test_brain_records_successful_strategy_in_learning_and_experience(tmp_path):
+    tool_request = json.dumps({"tool": "calculator", "arguments": {"expression": "6*7"}})
+    brain = FakeBrain([tool_request, "O resultado é 42."], tmp_path)
+
+    brain.ask("Calcule 6*7")
+
+    learned = brain.learning.relevant("Calcule 6*7")
+    assert learned
+    assert learned[0]["successes"] >= 1
+    assert learned[0]["failures"] == 0
+
+    experiences = brain.experiences.relevant("Calcule 6*7")
+    assert experiences
+    assert experiences[0]["success"] == 1
+
+
+def test_brain_records_failed_strategy_in_learning_and_experience(tmp_path):
+    tool_request = json.dumps({"tool": "calculator", "arguments": {"expression": "1/0"}})
+    brain = FakeBrain([tool_request, "O cálculo falhou."], tmp_path)
+
+    brain.ask("Calcule 1/0")
+
+    learned = brain.learning.relevant("Calcule 1/0")
+    assert learned
+    assert learned[0]["failures"] >= 1
+    assert learned[0]["success"] == 0
+
+    experiences = brain.experiences.relevant("Calcule 1/0")
+    assert experiences
+    assert experiences[0]["success"] == 0
+
+
+def test_brain_respects_maximum_tool_steps(tmp_path):
+    tool_request = json.dumps({"tool": "calculator", "arguments": {"expression": "1+1"}})
+    brain = FakeBrain([tool_request] * 20, tmp_path)
+
+    brain.ask("Execute várias etapas de cálculo")
+
+    assert len(brain.task_engine.steps) == 8
+    assert all(step.ok for step in brain.task_engine.steps)
+
+
 def test_brain_evaluator_failure_is_non_fatal(tmp_path, monkeypatch):
     brain = FakeBrain(["Resposta que deve continuar disponível."], tmp_path)
 
