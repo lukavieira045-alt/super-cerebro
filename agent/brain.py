@@ -10,7 +10,7 @@ from .autonomy import build_autonomy_context
 from .confidence import estimate, prompt as confidence_prompt
 from .contradictions import context as contradiction_context
 from .evaluator import judge_with_vireonix, local_check, revision_instruction
-from .evidence import verify_with_model
+from .evidence import inspect_research, verify_with_model
 from .experience_memory import ExperienceMemory
 from .goals import Goals
 from .health import HealthReport, run_health_checks
@@ -215,9 +215,13 @@ class SuperCerebro:
             return answer
 
     def _verify_research(self, research: str) -> str:
+        report = inspect_research(research)
         try:
             verified = verify_with_model(research, self._call_vireonix)
-            self._research_verified = True
+            # A resposta do Vireonix é uma análise da evidência, mas só marcamos
+            # a pesquisa como "verificada" quando a estrutura também sustenta isso:
+            # pelo menos duas fontes utilizáveis e nenhum conflito estrutural.
+            self._research_verified = report.reliable_enough
             return verified
         except RuntimeError:
             self._research_verified = False
