@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">
+<defs>
+ <radialGradient id="halo"><stop stop-color="#22d3ee" stop-opacity=".38"/><stop offset="1" stop-color="#22d3ee" stop-opacity="0"/></radialGradient>
+ <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f7fafc"/><stop offset=".45" stop-color="#9aa5b1"/><stop offset="1" stop-color="#202b38"/></linearGradient>
+ <linearGradient id="dark" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#243344"/><stop offset="1" stop-color="#050b12"/></linearGradient>
+ <filter id="glow"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<circle cx="400" cy="400" r="350" fill="url(#halo)"/>
+<g stroke="#07111b" stroke-width="10" stroke-linejoin="round">
+ <path fill="url(#dark)" d="M260 255c-12-110 45-180 140-180s152 70 140 180l-30 150H290z"/>
+ <path fill="url(#metal)" d="M315 130c28-34 82-48 130-32 49 16 74 58 67 118l-17 116-76 49-104-50-18-115c-6-36 0-63 18-86z"/>
+ <path fill="#07111b" d="M315 181c32-48 132-62 184-2l-7 116-87 50-83-50z"/>
+ <path fill="#38e8ff" filter="url(#glow)" d="M338 204h48l-13 24h-39zM414 204h48l4 24h-40zM378 252h44l-8 31h-30z" stroke="none"/>
+ <circle cx="400" cy="115" r="12" fill="#38e8ff" filter="url(#glow)"/>
+ <path fill="url(#metal)" d="M315 360l-72 55-42 116 70 25 57-105zM485 360l72 55 42 116-70 25-57-105z"/>
+ <path fill="url(#metal)" d="M278 388c38-42 204-42 244 0l70 105-43 180c-91 44-207 44-298 0l-43-180z"/>
+ <path fill="url(#dark)" d="M320 430h160l38 72-43 72H325l-43-72z"/>
+ <path fill="#38e8ff" filter="url(#glow)" d="M352 467h96l18 25-18 25h-96l-18-25z"/>
+ <path fill="url(#dark)" d="M325 575h150l22 70-34 78H337l-34-78z"/>
+ <path fill="none" stroke="#38e8ff" stroke-width="6" d="M350 606h100M342 628h116M350 650h100"/>
+ <path fill="url(#metal)" d="M230 510l-82 34-62 118 55 34 78-83 55-57zM570 510l82 34 62 118-55 34-78-83-55-57z"/>
+ <path fill="url(#dark)" d="M116 658l-37 67 59 34 53-68zM684 658l37 67-59 34-53-68z"/>
+ <circle cx="220" cy="476" r="17" fill="#38e8ff" filter="url(#glow)"/>
+ <circle cx="580" cy="476" r="17" fill="#38e8ff" filter="url(#glow)"/>
+</g>
+</svg>
