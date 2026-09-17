@@ -13,6 +13,7 @@ from .learning import Learning
 from .memory import Memory
 from .planner import format_plan, make_plan
 from .research import deep_research
+from .self_improvement import SelfImprovement
 from .task_engine import TaskEngine
 from .tools import TOOL_DESCRIPTIONS, execute_tool
 
@@ -22,13 +23,14 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + objetivos + planejamento + autonomia + aprendizado + ferramentas + juiz interno."""
+    """Vireonix + memória + objetivos + autonomia + aprendizado + autoaperfeiçoamento."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
         self.memory = memory or Memory()
         self.learning = learning or Learning(self.memory.db_path)
         self.goals = Goals(self.memory.db_path)
+        self.improvement = SelfImprovement(self.learning)
         self.messages: list[dict[str, str]] = []
         self.task_engine = TaskEngine(MAX_TOOL_STEPS)
 
@@ -39,18 +41,11 @@ class SuperCerebro:
         goal_context = self.goals.context(limit=5)
         related_goals = self.goals.active_for(text, limit=3)
         plan = make_plan(text)
-        seen = {(item["role"], item["content"]) for item in recent}
         context: list[dict[str, str]] = [{"role": "system", "content": format_plan(plan)}]
         if goal_context:
             context.append({"role": "system", "content": goal_context})
         if related_goals:
-            context.append({
-                "role": "system",
-                "content": "OBJETIVOS RELACIONADOS À MENSAGEM ATUAL:\n" + "\n".join(
-                    f"- #{goal['id']}: {goal['title']} — {goal['progress'] or 'sem progresso registrado'}"
-                    for goal in related_goals
-                ),
-            })
+            context.append({"role": "system", "content": "OBJETIVOS RELACIONADOS À MENSAGEM ATUAL:\n" + "\n".join(f"- #{goal['id']}: {goal['title']} — {goal['progress'] or 'sem progresso registrado'}" for goal in related_goals)})
         autonomy = build_autonomy_context(plan, int(related_goals[0]["id"]) if related_goals else None, MAX_TOOL_STEPS)
         if autonomy:
             context.append({"role": "system", "content": autonomy})
@@ -58,18 +53,13 @@ class SuperCerebro:
             context.append({"role": "system", "content": memory_context})
         if learned:
             context.append({"role": "system", "content": learned + "\nUse essas experiências como referência, não como verdade absoluta. Reavalie tudo na tarefa atual."})
-        context.extend(item for item in recent if (item["role"], item["content"]) in seen)
+        context.extend(recent)
         context.append({"role": "user", "content": text})
         return context
 
     def _call_vireonix(self, messages: list[dict[str, str]]) -> str:
         try:
-            response = requests.post(
-                VIREONIX_URL,
-                headers={"Content-Type": "application/json"},
-                json={"model": MODEL, "messages": messages},
-                timeout=self.timeout,
-            )
+            response = requests.post(VIREONIX_URL, headers={"Content-Type": "application/json"}, json={"model": MODEL, "messages": messages}, timeout=self.timeout)
             response.raise_for_status()
             return response.json()["choices"][0]["message"]["content"]
         except requests.RequestException as exc:
@@ -86,9 +76,7 @@ class SuperCerebro:
             data = json.loads(text)
         except json.JSONDecodeError:
             return None
-        if not isinstance(data, dict) or not isinstance(data.get("tool"), str):
-            return None
-        if not isinstance(data.get("arguments", {}), dict):
+        if not isinstance(data, dict) or not isinstance(data.get("tool"), str) or not isinstance(data.get("arguments", {}), dict):
             return None
         return data
 
@@ -98,20 +86,9 @@ class SuperCerebro:
         return execute_tool(tool, arguments)
 
     def _extract_facts(self, user_text: str, answer: str) -> None:
-        prompt = (
-            "Extraia somente fatos duradouros e úteis para futuras conversas. "
-            "Não invente nada e não salve senhas, tokens, chaves, dados bancários "
-            "ou informações extremamente sensíveis. Responda SOMENTE com JSON em "
-            "uma lista, no formato [{\"category\":\"...\",\"fact\":\"...\",\"importance\":1}]. "
-            "Se não houver fatos úteis, responda [].\n\n"
-            f"Usuário: {user_text}\nResposta: {answer}"
-        )
+        prompt = ("Extraia somente fatos duradouros e úteis para futuras conversas. Não invente nada e não salve senhas, tokens, chaves, dados bancários ou informações extremamente sensíveis. Responda SOMENTE com JSON em uma lista, no formato [{\"category\":\"...\",\"fact\":\"...\",\"importance\":1}]. Se não houver fatos úteis, responda [].\n\n" f"Usuário: {user_text}\nResposta: {answer}")
         try:
-            content = self._call_vireonix([
-                {"role": "system", "content": "Você é um extrator de memória. Seja conservador."},
-                {"role": "user", "content": prompt},
-            ])
-            facts = json.loads(content)
+            facts = json.loads(self._call_vireonix([{"role": "system", "content": "Você é um extrator de memória. Seja conservador."}, {"role": "user", "content": prompt}]))
             if not isinstance(facts, list):
                 return
             for item in facts[:5]:
@@ -122,13 +99,7 @@ class SuperCerebro:
 
     def _verify_final(self, messages: list[dict[str, str]], answer: str) -> str:
         trace = self.task_engine.trace_text()
-        verification = (
-            "VERIFICAÇÃO FINAL DA TAREFA.\n"
-            "Revise a resposta usando somente o histórico e resultados das ferramentas. "
-            "Corrija afirmações sem suporte, contradições, cálculos errados e conclusões sem evidência. "
-            "Não invente dados. Entregue diretamente a resposta final.\n\n"
-            f"ETAPAS EXECUTADAS:\n{trace}\n\nRESPOSTA A REVISAR:\n{answer}"
-        )
+        verification = ("VERIFICAÇÃO FINAL DA TAREFA.\nRevise a resposta usando somente o histórico e resultados das ferramentas. Corrija afirmações sem suporte, contradições, cálculos errados e conclusões sem evidência. Não invente dados. Entregue diretamente a resposta final.\n\n" f"ETAPAS EXECUTADAS:\n{trace}\n\nRESPOSTA A REVISAR:\n{answer}")
         try:
             checked = self._call_vireonix(messages + [{"role": "system", "content": verification}])
             return checked.strip() or answer
@@ -153,34 +124,21 @@ class SuperCerebro:
             return answer
 
     def _update_goals(self, text: str, answer: str) -> None:
-        """Cria ou atualiza objetivos somente quando a tarefa tem perfil persistente."""
         plan = make_plan(text)
         related = self.goals.active_for(text, limit=1)
-        goal_id: int | None = int(related[0]["id"]) if related else None
+        goal_id = int(related[0]["id"]) if related else None
         if plan.complex and goal_id is None:
             goal_id = self.goals.create(text)
         if goal_id is None:
             return
         strategy = self.task_engine.strategy_summary()
-        if strategy:
-            progress = f"Última execução: {strategy}. Resultado: {'sucesso' if self.task_engine.all_successful() else 'houve falha em uma ou mais etapas'}."
-        else:
-            progress = "Etapa de análise/resposta concluída; objetivo permanece ativo para continuidade."
+        progress = (f"Última execução: {strategy}. Resultado: {'sucesso' if self.task_engine.all_successful() else 'houve falha em uma ou mais etapas'}." if strategy else "Etapa de análise/resposta concluída; objetivo permanece ativo para continuidade.")
         self.goals.update(goal_id, progress)
 
     def ask(self, text: str) -> str:
         self.task_engine.reset()
-        tool_descriptions = TOOL_DESCRIPTIONS + (
-            '\n- deep_research: pesquisa várias fontes e reúne conteúdo para comparação. '
-            'Argumentos: {"query":"tema a investigar","sources":4}'
-            '\n\nPara tarefas complexas, siga o plano inicial, mas ajuste-o conforme os resultados. '
-            'Depois de cada ferramenta, verifique se a próxima etapa é necessária. '
-            'Em modo autônomo, continue executando etapas úteis até concluir ou atingir o limite.'
-        )
-        messages: list[dict[str, str]] = [
-            {"role": "system", "content": build_system_prompt(tool_descriptions)},
-            *self._build_context(text),
-        ]
+        tool_descriptions = TOOL_DESCRIPTIONS + ('\n- deep_research: pesquisa várias fontes e reúne conteúdo para comparação. Argumentos: {"query":"tema a investigar","sources":4}\n\nPara tarefas complexas, siga o plano inicial, mas ajuste-o conforme os resultados. Depois de cada ferramenta, verifique se a próxima etapa é necessária. Em modo autônomo, continue executando etapas úteis até concluir ou atingir o limite.')
+        messages: list[dict[str, str]] = [{"role": "system", "content": build_system_prompt(tool_descriptions)}, *self._build_context(text)]
         answer = self._call_vireonix(messages)
         for _ in range(MAX_TOOL_STEPS):
             request = self._parse_tool_request(answer)
@@ -189,10 +147,7 @@ class SuperCerebro:
             tool = request["tool"]
             arguments = request["arguments"]
             result = self.task_engine.execute(tool, arguments, self._run_tool)
-            messages.extend([
-                {"role": "assistant", "content": answer},
-                {"role": "system", "content": f"Resultado da ferramenta {tool}:\n{result}\n\nHistórico:\n{self.task_engine.trace_text()}\n\nContinue seguindo ou ajustando o plano. Verifique o resultado antes da próxima etapa."},
-            ])
+            messages.extend([{ "role": "assistant", "content": answer}, {"role": "system", "content": f"Resultado da ferramenta {tool}:\n{result}\n\nHistórico:\n{self.task_engine.trace_text()}\n\nContinue seguindo ou ajustando o plano. Verifique o resultado antes da próxima etapa."}])
             answer = self._call_vireonix(messages)
 
         if self.task_engine.steps:
@@ -202,10 +157,10 @@ class SuperCerebro:
         strategy = self.task_engine.strategy_summary()
         if strategy:
             success = self.task_engine.all_successful()
-            self.learning.record(text, strategy, success)
             failures = [step for step in self.task_engine.steps if not step.ok]
             reason = "Todas as etapas terminaram com sucesso." if not failures else "; ".join(f"{step.tool}: {step.result[:180]}" for step in failures)
-            self.learning.record_experience(text, strategy, success, reason)
+            improvement = self.improvement.analyze(text, [step.__dict__ for step in self.task_engine.steps], success, reason)
+            self.improvement.apply(text, strategy, improvement)
 
         self._update_goals(text, answer)
         self.messages = messages + [{"role": "assistant", "content": answer}]
