@@ -1,4 +1,4 @@
-"""Aprendizado local de estratégias e experiências do Super Cérebro."""
+"""Aprendizado local adaptativo do Super Cérebro."""
 
 from __future__ import annotations
 
@@ -8,8 +8,11 @@ from pathlib import Path
 from typing import Any
 
 
+STOPWORDS = {"para", "como", "isso", "essa", "esse", "esta", "este", "mais", "menos", "muito", "tambem", "porque", "quando", "onde", "qual", "quais", "uma", "umas", "uma", "dos", "das", "com", "sem", "sobre", "por", "pra"}
+
+
 class Learning:
-    """Registra estratégias e experiências para reutilização futura."""
+    """Registra experiências e escolhe estratégias pelo histórico de sucesso."""
 
     def __init__(self, db_path: str | Path = "data/memory.db") -> None:
         self.db_path = Path(db_path)
@@ -46,6 +49,17 @@ class Learning:
     def _normalize(text: str) -> str:
         return re.sub(r"\s+", " ", str(text).strip().lower())[:160]
 
+    @staticmethod
+    def _terms(text: str) -> set[str]:
+        return {w.lower() for w in re.findall(r"[\wÀ-ÿ]+", str(text)) if len(w) >= 4 and w.lower() not in STOPWORDS}
+
+    @classmethod
+    def _similarity(cls, a: str, b: str) -> float:
+        left, right = cls._terms(a), cls._terms(b)
+        if not left or not right:
+            return 0.0
+        return len(left & right) / max(1, len(left | right))
+
     def record(self, task_type: str, strategy: str, success: bool = True) -> None:
         task_type = self._normalize(task_type) or "geral"
         strategy = str(strategy).strip()
@@ -61,78 +75,69 @@ class Learning:
                 (task_type, strategy, int(success)))
 
     def record_experience(self, task_type: str, strategy: str, success: bool, reason: str = "") -> None:
-        """Guarda uma experiência concreta: o caminho usado e o resultado observado."""
         task_type = self._normalize(task_type) or "geral"
         strategy = str(strategy).strip()[:500]
         reason = re.sub(r"\s+", " ", str(reason).strip())[:500]
         if not strategy:
             return
         with self._connect() as db:
-            db.execute(
-                "INSERT INTO experiences (task_type, strategy, success, reason) VALUES (?, ?, ?, ?)",
-                (task_type, strategy, int(success), reason),
-            )
-            db.execute(
-                "DELETE FROM experiences WHERE id NOT IN (SELECT id FROM experiences ORDER BY id DESC LIMIT 300)"
-            )
+            db.execute("INSERT INTO experiences (task_type, strategy, success, reason) VALUES (?, ?, ?, ?)", (task_type, strategy, int(success), reason))
+            db.execute("DELETE FROM experiences WHERE id NOT IN (SELECT id FROM experiences ORDER BY id DESC LIMIT 300)")
 
     def relevant(self, task_type: str, limit: int = 5) -> list[dict[str, Any]]:
-        key = self._normalize(task_type)
-        words = [word for word in re.findall(r"[\wÀ-ÿ]+", key) if len(word) >= 4]
+        """Busca estratégias por semelhança e dá mais peso a sucessos repetidos."""
         with self._connect() as db:
-            if words:
-                clauses = " OR ".join("task_type LIKE ?" for _ in words)
-                params = [f"%{word}%" for word in words]
-                rows = db.execute(
-                    f"SELECT task_type, strategy, success, uses FROM strategies WHERE {clauses} ORDER BY success DESC, uses DESC, updated_at DESC LIMIT ?",
-                    (*params, limit),
-                ).fetchall()
-            else:
-                rows = db.execute(
-                    "SELECT task_type, strategy, success, uses FROM strategies ORDER BY success DESC, uses DESC, updated_at DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
-        return [dict(row) for row in rows]
+            rows = db.execute("SELECT task_type, strategy, success, uses FROM strategies ORDER BY updated_at DESC LIMIT 500").fetchall()
+        ranked = []
+        for row in rows:
+            item = dict(row)
+            similarity = self._similarity(task_type, item["task_type"])
+            if similarity > 0 or self._normalize(task_type) == item["task_type"]:
+                success_bonus = 2.0 if item["success"] else -1.0
+                use_bonus = min(2.0, item["uses"] * 0.15)
+                ranked.append((similarity * 10 + success_bonus + use_bonus, item))
+        ranked.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for _, item in ranked[:max(1, limit)]]
 
     def relevant_experiences(self, task_type: str, limit: int = 5) -> list[dict[str, Any]]:
-        """Recupera experiências semelhantes, incluindo sucessos e falhas recentes."""
-        key = self._normalize(task_type)
-        words = [word for word in re.findall(r"[\wÀ-ÿ]+", key) if len(word) >= 4]
         with self._connect() as db:
-            if words:
-                clauses = " OR ".join("task_type LIKE ?" for _ in words)
-                params = [f"%{word}%" for word in words]
-                rows = db.execute(
-                    f"SELECT task_type, strategy, success, reason FROM experiences WHERE {clauses} ORDER BY id DESC LIMIT ?",
-                    (*params, limit),
-                ).fetchall()
-            else:
-                rows = db.execute(
-                    "SELECT task_type, strategy, success, reason FROM experiences ORDER BY id DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
-        return [dict(row) for row in rows]
+            rows = db.execute("SELECT task_type, strategy, success, reason FROM experiences ORDER BY id DESC LIMIT 500").fetchall()
+        ranked = []
+        for row in rows:
+            item = dict(row)
+            similarity = self._similarity(task_type, item["task_type"])
+            if similarity > 0:
+                ranked.append((similarity * 10 + (1.5 if item["success"] else 0), item))
+        ranked.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for _, item in ranked[:max(1, limit)]]
+
+    def best_strategies(self, task_type: str, limit: int = 3) -> list[dict[str, Any]]:
+        """Retorna caminhos aprendidos com maior evidência de sucesso."""
+        return [item for item in self.relevant(task_type, limit * 2) if item["success"]][:limit]
+
+    def avoid_strategies(self, task_type: str, limit: int = 3) -> list[dict[str, Any]]:
+        """Retorna caminhos que falharam para o agente evitar repetir cegamente."""
+        experiences = self.relevant_experiences(task_type, limit * 3)
+        return [item for item in experiences if not item["success"]][:limit]
 
     def context(self, task_type: str, limit: int = 5) -> str:
         items = self.relevant(task_type, limit)
         experiences = self.relevant_experiences(task_type, limit)
+        best = self.best_strategies(task_type, 3)
+        avoid = self.avoid_strategies(task_type, 3)
         parts: list[str] = []
-        if items:
-            parts.append("Estratégias aprendidas de tarefas anteriores:\n" + "\n".join(
-                f"- {item['strategy']} (usada {item['uses']}x; sucesso={bool(item['success'])})"
-                for item in items
-            ))
+        if best:
+            parts.append("ESTRATÉGIAS COM MAIOR EVIDÊNCIA DE SUCESSO:\n" + "\n".join(f"- {item['strategy']} (usada {item['uses']}x)" for item in best))
+        if avoid:
+            parts.append("ESTRATÉGIAS QUE DEVEM SER REAVALIADAS OU EVITADAS:\n" + "\n".join(f"- {item['strategy']} — {item['reason']}" for item in avoid))
         if experiences:
-            parts.append("Experiências recentes semelhantes:\n" + "\n".join(
-                f"- {'SUCESSO' if item['success'] else 'FALHA'}: {item['strategy']}"
-                + (f" — {item['reason']}" if item['reason'] else "")
-                for item in experiences
-            ))
+            parts.append("EXPERIÊNCIAS SEMELHANTES:\n" + "\n".join(f"- {'SUCESSO' if item['success'] else 'FALHA'}: {item['strategy']}" + (f" — {item['reason']}" if item['reason'] else "") for item in experiences))
+        elif items:
+            parts.append("ESTRATÉGIAS APRENDIDAS:\n" + "\n".join(f"- {item['strategy']}" for item in items))
         return "\n\n".join(parts)
 
     @staticmethod
     def summarize_trace(trace: list[dict[str, Any]]) -> str:
-        """Converte o histórico de ferramentas em uma estratégia compacta."""
         parts = []
         for step in trace:
             tool = str(step.get("tool", ""))
