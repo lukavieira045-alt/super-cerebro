@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import requests
 
 from .autonomy import build_autonomy_context
@@ -29,6 +30,7 @@ from .tools import TOOL_DESCRIPTIONS, execute_tool
 VIREONIX_URL = "https://vireonix.ai/v1/chat/completions"
 MODEL = "auto"
 MAX_TOOL_STEPS = 8
+VIREONIX_RETRIES = 2
 
 
 class SuperCerebro:
@@ -98,14 +100,32 @@ class SuperCerebro:
         return context
 
     def _call_vireonix(self, messages: list[dict[str, str]]) -> str:
-        try:
-            response = requests.post(VIREONIX_URL, headers={"Content-Type": "application/json"}, json={"model": MODEL, "messages": messages}, timeout=self.timeout)
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except requests.RequestException as exc:
-            raise RuntimeError(f"Falha ao conectar ao Vireonix: {exc}") from exc
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
-            raise RuntimeError("Resposta inválida recebida do Vireonix.") from exc
+        """Chama o Vireonix com retry apenas para falhas transitórias."""
+        last_error: Exception | None = None
+        for attempt in range(VIREONIX_RETRIES + 1):
+            try:
+                response = requests.post(
+                    VIREONIX_URL,
+                    headers={"Content-Type": "application/json"},
+                    json={"model": MODEL, "messages": messages},
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                return response.json()["choices"][0]["message"]["content"]
+            except requests.HTTPError as exc:
+                last_error = exc
+                status = exc.response.status_code if exc.response is not None else None
+                if status not in {429, 500, 502, 503, 504} or attempt >= VIREONIX_RETRIES:
+                    raise RuntimeError(f"Falha ao conectar ao Vireonix: {exc}") from exc
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last_error = exc
+                if attempt >= VIREONIX_RETRIES:
+                    raise RuntimeError(f"Falha ao conectar ao Vireonix: {exc}") from exc
+            except requests.RequestException as exc:
+                raise RuntimeError(f"Falha ao conectar ao Vireonix: {exc}") from exc
+            if attempt < VIREONIX_RETRIES:
+                time.sleep(0.5 * (2 ** attempt))
+        raise RuntimeError(f"Falha ao conectar ao Vireonix: {last_error}")
 
     @staticmethod
     def _parse_tool_request(answer: str) -> dict | None:
@@ -151,7 +171,6 @@ class SuperCerebro:
             return
 
     def _remember_sources(self, research: str, query: str) -> None:
-        """Registra URLs encontradas na pesquisa sem transformar a existência da URL em prova."""
         import re
         blocks = re.split(r"\n---\n", str(research))
         for block in blocks[:8]:
