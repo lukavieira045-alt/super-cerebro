@@ -16,6 +16,7 @@ from .memory import Memory
 from .planner import format_plan, make_plan
 from .research import deep_research
 from .self_improvement import SelfImprovement
+from .semantic_memory import expand_query
 from .task_engine import TaskEngine
 from .tools import TOOL_DESCRIPTIONS, execute_tool
 
@@ -25,7 +26,7 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + objetivos + autonomia + aprendizado + autoaperfeiçoamento + evidências + confiança."""
+    """Vireonix + memória semântica + objetivos + autonomia + aprendizado + evidências."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
@@ -39,7 +40,11 @@ class SuperCerebro:
 
     def _build_context(self, text: str) -> list[dict[str, str]]:
         recent = self.memory.recent(limit=12)
-        memory_context = self.memory.memory_context(text, limit=8)
+        try:
+            memory_query = expand_query(text, self._call_vireonix)
+        except RuntimeError:
+            memory_query = text
+        memory_context = self.memory.memory_context(memory_query, limit=8)
         learned = self.learning.context(text, limit=5)
         goal_context = self.goals.context(limit=5)
         related_goals = self.goals.active_for(text, limit=3)
