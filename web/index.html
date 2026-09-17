@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#070b14">
+  <title>Super Cérebro</title>
+  <link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brain-logo" aria-hidden="true">✦</div>
+        <div>
+          <h1>Super Cérebro</h1>
+          <span><i class="status-dot"></i> Vireonix conectado</span>
+        </div>
+      </div>
+      <button id="newChat" class="icon-button" title="Nova conversa" aria-label="Nova conversa">＋</button>
+    </header>
+
+    <main id="chat" class="chat" aria-live="polite">
+      <section class="welcome">
+        <div class="welcome-orb">✦</div>
+        <h2>Como posso ajudar?</h2>
+        <p>Converse com o Super Cérebro. Ele usa o Vireonix como núcleo de inteligência.</p>
+        <div class="quick-actions">
+          <button data-prompt="Explique como você organiza uma tarefa complexa.">🧠 Explicar</button>
+          <button data-prompt="Pesquise e compare informações sobre inteligência artificial.">🔎 Pesquisar</button>
+          <button data-prompt="Ajude-me a criar um plano passo a passo para um projeto.">⚙️ Planejar</button>
+          <button data-prompt="Faça um diagnóstico da sua capacidade local de ferramentas.">🩺 Diagnóstico</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="composer-wrap">
+      <div class="composer">
+        <textarea id="message" rows="1" maxlength="20000" placeholder="Digite sua mensagem..." aria-label="Mensagem"></textarea>
+        <button id="send" class="send-button" aria-label="Enviar">➤</button>
+      </div>
+      <div class="composer-meta">
+        <span id="typing"></span>
+        <span>Vireonix • memória • ferramentas • pesquisa</span>
+      </div>
+    </footer>
+  </div>
+  <script src="/web/app.js"></script>
+</body>
+</html>
