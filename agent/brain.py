@@ -8,20 +8,22 @@ import requests
 from .intelligence import build_system_prompt
 from .memory import Memory
 from .research import deep_research
+from .task_engine import TaskEngine
 from .tools import TOOL_DESCRIPTIONS, execute_tool
 
 VIREONIX_URL = "https://vireonix.ai/v1/chat/completions"
 MODEL = "auto"
-MAX_TOOL_STEPS = 4
+MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória persistente + execução controlada de ferramentas."""
+    """Vireonix + memória persistente + ferramentas + orquestração."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None) -> None:
         self.timeout = timeout
         self.memory = memory or Memory()
         self.messages: list[dict[str, str]] = []
+        self.task_engine = TaskEngine(MAX_TOOL_STEPS)
 
     def _build_context(self, text: str) -> list[dict[str, str]]:
         recent = self.memory.recent(limit=12)
@@ -68,6 +70,11 @@ class SuperCerebro:
             return None
         return data
 
+    def _run_tool(self, tool: str, arguments: dict) -> str:
+        if tool == "deep_research":
+            return deep_research(arguments.get("query", ""), arguments.get("sources", 4))
+        return execute_tool(tool, arguments)
+
     def _extract_facts(self, user_text: str, answer: str) -> None:
         prompt = (
             "Extraia somente fatos duradouros e úteis para futuras conversas. "
@@ -91,11 +98,31 @@ class SuperCerebro:
         except (RuntimeError, KeyError, IndexError, TypeError, ValueError):
             return
 
+    def _verify_final(self, messages: list[dict[str, str]], answer: str) -> str:
+        """Pede ao próprio Vireonix uma revisão final baseada apenas nas evidências."""
+        trace = self.task_engine.trace_text()
+        verification = (
+            "VERIFICAÇÃO FINAL DA TAREFA.\n"
+            "Revise a resposta abaixo usando somente o histórico e os resultados das ferramentas. "
+            "Corrija afirmações sem suporte, contradições, cálculos errados e conclusões que não seguem das evidências. "
+            "Não invente dados ausentes. Entregue diretamente a resposta final ao usuário, sem falar sobre esta revisão.\n\n"
+            f"ETAPAS EXECUTADAS:\n{trace}\n\n"
+            f"RESPOSTA A REVISAR:\n{answer}"
+        )
+        try:
+            checked = self._call_vireonix(messages + [{"role": "system", "content": verification}])
+            return checked.strip() or answer
+        except RuntimeError:
+            return answer
+
     def ask(self, text: str) -> str:
-        """Resolve a tarefa e executa ferramentas locais quando necessário."""
+        """Resolve uma tarefa, encadeia ferramentas e verifica a resposta final."""
+        self.task_engine.reset()
         tool_descriptions = TOOL_DESCRIPTIONS + (
             '\n- deep_research: pesquisa várias fontes, abre as fontes encontradas e reúne o conteúdo para comparação. '
             'Argumentos: {"query":"tema a investigar","sources":4}'
+            '\n\nPara tarefas complexas, encadeie várias ferramentas quando necessário. Depois de cada resultado, '
+            'analise se a próxima etapa é necessária. Não repita uma ferramenta sem motivo.'
         )
         messages: list[dict[str, str]] = [
             {"role": "system", "content": build_system_prompt(tool_descriptions)},
@@ -107,19 +134,17 @@ class SuperCerebro:
             request = self._parse_tool_request(answer)
             if request is None:
                 break
-            try:
-                if request["tool"] == "deep_research":
-                    args = request["arguments"]
-                    result = deep_research(args.get("query", ""), args.get("sources", 4))
-                else:
-                    result = execute_tool(request["tool"], request["arguments"])
-            except Exception as exc:
-                result = f"ERRO DA FERRAMENTA: {exc}"
+            tool = request["tool"]
+            arguments = request["arguments"]
+            result = self.task_engine.execute(tool, arguments, self._run_tool)
             messages.extend([
                 {"role": "assistant", "content": answer},
-                {"role": "system", "content": f"Resultado da ferramenta {request['tool']}:\n{result}\nAgora continue e responda ao usuário. Se outra ferramenta for necessária, use o JSON exigido."},
+                {"role": "system", "content": f"Resultado da ferramenta {tool}:\n{result}\n\nHistórico das etapas:\n{self.task_engine.trace_text()}\n\nAgora continue a tarefa. Verifique o resultado antes de decidir a próxima etapa. Se outra ferramenta for necessária, use o JSON exigido; caso contrário, responda ao usuário."},
             ])
             answer = self._call_vireonix(messages)
+
+        if self.task_engine.steps:
+            answer = self._verify_final(messages, answer)
 
         self.messages = messages + [{"role": "assistant", "content": answer}]
         self.memory.add("user", text)
