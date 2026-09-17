@@ -1,6 +1,6 @@
 const chat=document.getElementById('chat'),message=document.getElementById('message'),send=document.getElementById('send'),newChat=document.getElementById('newChat'),typing=document.getElementById('typing'),brainStage=document.getElementById('brainStage'),brainState=document.getElementById('brainState'),voice=document.getElementById('voice');
 const GATEWAY='https://super-cerebro.hatchable.site/api/chat';
-let recognition=null,history=[],speakTimer=null,selectedImage=null;
+let recognition=null,history=[],speakTimer=null,selectedImage=null,tesseractPromise=null;
 
 function cognitiveSystem(text){return window.SuperCerebroCognitive?.buildSystem(text)||'Você é o Super Cérebro. Responda em português do Brasil com precisão, raciocínio cuidadoso e sem inventar informações.'}
 function setBrainState(s){brainStage.classList.remove('thinking','listening','speaking');if(s)brainStage.classList.add(s);brainState.textContent=({listening:'Ouvindo...',thinking:'Pensando...',speaking:'Falando...'}[s]||'Pronto para pensar')}
@@ -25,43 +25,43 @@ async function callVireonix(value,extraContext=''){
   throw new Error(lastError)
 }
 
+function loadTesseract(){
+  if(window.Tesseract)return Promise.resolve(window.Tesseract);
+  if(tesseractPromise)return tesseractPromise;
+  tesseractPromise=new Promise((resolve,reject)=>{
+    const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';s.async=true;
+    s.onload=()=>window.Tesseract?resolve(window.Tesseract):reject(new Error('O leitor OCR não carregou.'));
+    s.onerror=()=>reject(new Error('Não foi possível carregar o leitor OCR. Verifique a conexão e tente novamente.'));
+    document.head.appendChild(s);
+  });
+  return tesseractPromise;
+}
+
 async function readImageText(file){
-  if(!window.Tesseract)throw new Error('Leitor de imagem ainda não carregou. Recarregue o aplicativo e tente novamente.');
-  setBrainState('thinking');
-  const result=await Tesseract.recognize(file,'por+eng',{logger:m=>{if(m.status==='recognizing text'&&typeof m.progress==='number'){brainState.textContent=`Lendo imagem... ${Math.round(m.progress*100)}%`}}});
-  const text=(result?.data?.text||'').replace(/\n{3,}/g,'\n\n').trim();
-  if(!text)return '';
-  return text;
+  const T=await loadTesseract();setBrainState('thinking');
+  const result=await T.recognize(file,'por+eng',{logger:m=>{if(m.status==='recognizing text'&&typeof m.progress==='number'){brainState.textContent=`Lendo imagem... ${Math.round(m.progress*100)}%`}}});
+  return (result?.data?.text||'').replace(/\n{3,}/g,'\n\n').trim();
 }
 
 async function ask(text){
-  const value=text.trim();
-  const hasImage=!!selectedImage;
-  if((!value&&!hasImage)||send.disabled)return;
-  document.getElementById('welcome')?.remove();
-  const imageForRead=selectedImage;
-  const imageName=imageForRead?.name||'print';
-  addMessage('user',hasImage?`🖼️ ${imageName}${value?'\n'+value:''}`:value);
-  message.value='';message.style.height='48px';send.disabled=true;setTyping(true);setBrainState('thinking');
+  const value=text.trim(),hasImage=!!selectedImage;if((!value&&!hasImage)||send.disabled)return;
+  document.getElementById('welcome')?.remove();const imageForRead=selectedImage,imageName=imageForRead?.name||'print';
+  addMessage('user',hasImage?`🖼️ ${imageName}${value?'\n'+value:''}`:value);message.value='';message.style.height='48px';send.disabled=true;setTyping(true);setBrainState('thinking');
   try{
     let context='';
-    if(imageForRead){
-      let ocr='';
-      try{ocr=await readImageText(imageForRead)}catch(e){ocr=''}
-      context=`O usuário enviou uma imagem/print. Você deve tratar o conteúdo abaixo como texto extraído da imagem por OCR. Analise com atenção e explique em português do Brasil, com detalhes, o que aparece escrito, organizando títulos, avisos, números, datas, botões, erros e instruções quando existirem. Não invente palavras que o OCR não encontrou. Se houver trecho duvidoso, marque como [trecho possivelmente incorreto]. Se o usuário não fez uma pergunta específica, faça primeiro uma descrição clara do que o print mostra e depois explique o significado de cada parte.\n\nNOME DO ARQUIVO: ${imageName}\n\nTEXTO EXTRAÍDO DO PRINT:\n${ocr||'[Não foi possível extrair texto da imagem. Informe que a leitura automática falhou e peça um print mais nítido.]'}`;
+    if(imageForRead){let ocr='';try{ocr=await readImageText(imageForRead)}catch(e){ocr=''}
+      context=`O usuário enviou uma imagem/print. Trate o conteúdo abaixo como texto extraído da imagem por OCR. Analise com atenção e explique em português do Brasil, com detalhes, o que aparece escrito, organizando títulos, avisos, números, datas, botões, erros e instruções quando existirem. Não invente palavras que o OCR não encontrou. Se houver trecho duvidoso, marque como [trecho possivelmente incorreto]. Se o usuário não fez uma pergunta específica, faça primeiro uma descrição clara do que o print mostra e depois explique o significado de cada parte.\n\nNOME DO ARQUIVO: ${imageName}\n\nTEXTO EXTRAÍDO DO PRINT:\n${ocr||'[Não foi possível extrair texto da imagem. Informe que a leitura automática falhou e peça um print mais nítido.]'}`;
     }
     const answer=await callVireonix(value||'Leia e explique este print detalhadamente.',context);
-    history.push({role:'user',content:context?`${value||'Leia e explique este print detalhadamente.'}\n${context}`:value},{role:'assistant',content:answer});
-    if(history.length>30)history=history.slice(-30);
+    history.push({role:'user',content:context?`${value||'Leia e explique este print detalhadamente.'}\n${context}`:value},{role:'assistant',content:answer});if(history.length>30)history=history.slice(-30);
     addMessage('assistant',answer);speakAnswer(answer)
   }catch(e){addMessage('assistant',`Não consegui processar a imagem ou conectar ao Vireonix.\n\n${e.message}`);setBrainState('')}
-  finally{selectedImage=null;const f=document.getElementById('fileInput');if(f)f.value='';document.getElementById('attachmentPreview')?.classList.remove('show');document.getElementById('attachmentInfo').textContent='';setTyping(false);send.disabled=false;message.focus()}
+  finally{selectedImage=null;const f=document.getElementById('fileInput');if(f)f.value='';document.getElementById('attachmentPreview')?.classList.remove('show');const info=document.getElementById('attachmentInfo');if(info)info.textContent='';setTyping(false);send.disabled=false;message.focus()}
 }
 
 function startVoice(){const R=window.SpeechRecognition||window.webkitSpeechRecognition;if(!R){addMessage('assistant','Seu navegador não oferece reconhecimento de voz.');return}recognition?.abort();recognition=new R();recognition.lang='pt-BR';recognition.interimResults=true;recognition.continuous=false;voice.classList.add('active');setBrainState('listening');recognition.onresult=e=>{let t='';for(let i=e.resultIndex;i<e.results.length;i++)t+=e.results[i][0].transcript;message.value=t;message.dispatchEvent(new Event('input'))};recognition.onend=()=>{voice.classList.remove('active');if(message.value.trim())ask(message.value);else setBrainState('')};recognition.onerror=()=>{voice.classList.remove('active');setBrainState('')};recognition.start()}
 
 const fileInput=document.getElementById('fileInput');
-fileInput?.addEventListener('change',e=>{const f=e.target.files?.[0];if(!f)return;if(!f.type.startsWith('image/')){alert('Escolha uma imagem ou print.');e.target.value='';return}selectedImage=f;const info=document.getElementById('attachmentInfo');const preview=document.getElementById('attachmentPreview');if(info)info.textContent=`🖼️ ${f.name} • ${Math.round(f.size/1024)} KB • pronto para leitura`;preview?.classList.add('show');message.focus()});
-
+fileInput?.addEventListener('change',e=>{const f=e.target.files?.[0];if(!f)return;if(!f.type.startsWith('image/')){alert('Escolha uma imagem ou print.');e.target.value='';return}selectedImage=f;const info=document.getElementById('attachmentInfo'),preview=document.getElementById('attachmentPreview');if(info)info.textContent=`🖼️ ${f.name} • ${Math.round(f.size/1024)} KB • pronto para leitura`;preview?.classList.add('show');message.focus()});
 document.getElementById('removeAttachment')?.addEventListener('click',()=>{selectedImage=null;if(fileInput)fileInput.value='';document.getElementById('attachmentPreview')?.classList.remove('show')});
 send.onclick=()=>ask(message.value);voice.onclick=startVoice;message.oninput=()=>{message.style.height='48px';message.style.height=`${Math.min(message.scrollHeight,180)}px`};message.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask(message.value)}};document.querySelectorAll('[data-prompt]').forEach(b=>b.onclick=()=>ask(b.dataset.prompt||''));newChat.onclick=()=>{speechSynthesis?.cancel();history=[];location.reload()};
