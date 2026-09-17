@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-STOPWORDS = {"para", "como", "isso", "essa", "esse", "esta", "este", "mais", "menos", "muito", "tambem", "porque", "quando", "onde", "qual", "quais", "uma", "umas", "dos", "das", "com", "sem", "sobre", "por", "pra"}
+STOPWORDS = {"para", "como", "isso", "essa", "esse", "esta", "este", "mais", "menos", "muito", "menos", "tambem", "porque", "quando", "onde", "qual", "quais", "uma", "umas", "dos", "das", "com", "sem", "sobre", "por", "pra"}
 
 
 class Learning:
@@ -52,7 +52,6 @@ class Learning:
                 reason TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )""")
-
             added_successes = self._ensure_column(db, "strategies", "successes", "INTEGER NOT NULL DEFAULT 0")
             added_failures = self._ensure_column(db, "strategies", "failures", "INTEGER NOT NULL DEFAULT 0")
             if added_successes or added_failures:
@@ -124,8 +123,10 @@ class Learning:
             if similarity > 0 or self._normalize(task_type) == item["task_type"]:
                 success_rate = self._success_rate(item)
                 rate_bonus = (success_rate - 0.5) * 4.0
-                use_bonus = min(2.0, item["uses"] * 0.15)
-                ranked.append((similarity * 10 + rate_bonus + use_bonus, item))
+                # A quantidade de usos é informativa, mas não deve superar a taxa
+                # real de sucesso. A evidência histórica é o sinal principal.
+                evidence_bonus = min(0.5, item["uses"] * 0.02)
+                ranked.append((similarity * 10 + rate_bonus + evidence_bonus, item))
         ranked.sort(key=lambda pair: pair[0], reverse=True)
         return [item for _, item in ranked[:max(1, limit)]]
 
