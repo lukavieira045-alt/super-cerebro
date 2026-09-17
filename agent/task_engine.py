@@ -56,3 +56,11 @@ class TaskEngine:
             status = "OK" if step.ok else "ERRO"
             lines.append(f"ETAPA {step.number} [{status}] {step.tool}: {step.result}")
         return "\n\n".join(lines)
+
+    def strategy_summary(self) -> str:
+        """Produz uma sequência compacta reutilizável como experiência."""
+        return " -> ".join(f"{step.tool}={'ok' if step.ok else 'erro'}" for step in self.steps)
+
+    def all_successful(self) -> bool:
+        """Indica se todas as ferramentas executadas terminaram sem erro."""
+        return bool(self.steps) and all(step.ok for step in self.steps)
