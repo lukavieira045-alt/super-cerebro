@@ -53,7 +53,11 @@ class Handler(BaseHTTPRequestHandler):
 
         routes = {
             "/": (WEB / "index.html", "text/html; charset=utf-8"),
+            "/index.html": (WEB / "index.html", "text/html; charset=utf-8"),
+            "/web/": (WEB / "index.html", "text/html; charset=utf-8"),
             "/web/index.html": (WEB / "index.html", "text/html; charset=utf-8"),
+            "/style.css": (WEB / "style.css", "text/css; charset=utf-8"),
+            "/app.js": (WEB / "app.js", "application/javascript; charset=utf-8"),
             "/web/style.css": (WEB / "style.css", "text/css; charset=utf-8"),
             "/web/app.js": (WEB / "app.js", "application/javascript; charset=utf-8"),
         }
