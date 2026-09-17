@@ -47,7 +47,7 @@ def test_context_budget_strictly_clips_when_callback_adds_marker():
         {"role": "user", "content": "PEDIDO_ATUAL_MUITO_LONGO"},
     ]
     bounded = bound_messages(messages, 10, clip)
-    assert bounded[-1]["content"] == "PEDIDO_ATUA"
+    assert bounded[-1]["content"] == "PEDIDO_ATU"
     assert len("".join(item["content"] for item in bounded)) <= 10
 
 
@@ -59,4 +59,4 @@ def test_brain_uses_safe_context_budget():
     ]
     bounded = SuperCerebro._bounded_messages(messages, 40)
     assert bounded[-1]["content"] == "PEDIDO_ATUAL"
-    assert sum(len(item["content"]) for item in bounded) <= 40
+    assert sum(len(item["content"] for item in bounded)) <= 40
