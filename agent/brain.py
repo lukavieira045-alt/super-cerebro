@@ -7,6 +7,7 @@ import requests
 
 from .autonomy import build_autonomy_context
 from .confidence import estimate, prompt as confidence_prompt
+from .contradictions import context as contradiction_context
 from .evaluator import judge_with_vireonix, local_check, revision_instruction
 from .evidence import verify_with_model
 from .experience_memory import ExperienceMemory
@@ -29,7 +30,7 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + experiências + grafo + tempo + objetivos + autonomia + aprendizado."""
+    """Vireonix + memória + experiências + grafo + tempo + contradições + autonomia."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
@@ -57,6 +58,10 @@ class SuperCerebro:
         temporal_context = self.temporal.context(text, limit=6)
         goal_context = self.goals.context(limit=5)
         related_goals = self.goals.active_for(text, limit=3)
+        try:
+            facts_context = contradiction_context(self.memory.facts(), limit=6)
+        except (AttributeError, TypeError):
+            facts_context = ""
         plan = make_plan(text)
         context: list[dict[str, str]] = [{"role": "system", "content": format_plan(plan)}]
         if goal_context:
@@ -76,6 +81,8 @@ class SuperCerebro:
             context.append({"role": "system", "content": knowledge_context})
         if temporal_context:
             context.append({"role": "system", "content": temporal_context})
+        if facts_context:
+            context.append({"role": "system", "content": facts_context})
         context.extend(recent)
         context.append({"role": "user", "content": text})
         return context
