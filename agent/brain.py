@@ -6,6 +6,7 @@ import json
 import requests
 
 from .evaluator import judge_with_vireonix, local_check, revision_instruction
+from .goals import Goals
 from .intelligence import build_system_prompt
 from .learning import Learning
 from .memory import Memory
@@ -20,31 +21,40 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + planejamento + aprendizado + ferramentas + juiz interno."""
+    """Vireonix + memória + objetivos + planejamento + aprendizado + ferramentas + juiz interno."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
         self.memory = memory or Memory()
         self.learning = learning or Learning(self.memory.db_path)
+        self.goals = Goals(self.memory.db_path)
         self.messages: list[dict[str, str]] = []
         self.task_engine = TaskEngine(MAX_TOOL_STEPS)
 
     def _build_context(self, text: str) -> list[dict[str, str]]:
         recent = self.memory.recent(limit=12)
-        relevant = self.memory.relevant(text, limit=6)
-        facts = self.memory.relevant_facts(text, limit=8)
+        memory_context = self.memory.memory_context(text, limit=8)
         learned = self.learning.context(text, limit=5)
+        goal_context = self.goals.context(limit=5)
+        related_goals = self.goals.active_for(text, limit=3)
         plan = make_plan(text)
         seen = {(item["role"], item["content"]) for item in recent}
-        relevant_unique = [item for item in relevant if (item["role"], item["content"]) not in seen]
         context: list[dict[str, str]] = [{"role": "system", "content": format_plan(plan)}]
-        if facts:
-            context.append({"role": "system", "content": "Memórias de longo prazo confirmadas:\n" + "\n".join(f"[{item['category']}] {item['fact']}" for item in facts)})
+        if goal_context:
+            context.append({"role": "system", "content": goal_context})
+        if related_goals:
+            context.append({
+                "role": "system",
+                "content": "OBJETIVOS RELACIONADOS À MENSAGEM ATUAL:\n" + "\n".join(
+                    f"- #{goal['id']}: {goal['title']} — {goal['progress'] or 'sem progresso registrado'}"
+                    for goal in related_goals
+                ),
+            })
+        if memory_context:
+            context.append({"role": "system", "content": memory_context})
         if learned:
             context.append({"role": "system", "content": learned + "\nUse essas experiências como referência, não como verdade absoluta. Reavalie tudo na tarefa atual."})
-        if relevant_unique:
-            context.append({"role": "system", "content": "Conversas anteriores relevantes:\n" + "\n".join(f"{item['role']}: {item['content']}" for item in relevant_unique)})
-        context.extend(recent)
+        context.extend(item for item in recent if (item["role"], item["content"]) in seen)
         context.append({"role": "user", "content": text})
         return context
 
@@ -138,6 +148,22 @@ class SuperCerebro:
         except RuntimeError:
             return answer
 
+    def _update_goals(self, text: str, answer: str) -> None:
+        """Cria ou atualiza objetivos somente quando a tarefa tem perfil persistente."""
+        plan = make_plan(text)
+        related = self.goals.active_for(text, limit=1)
+        goal_id: int | None = int(related[0]["id"]) if related else None
+        if plan.complex and goal_id is None:
+            goal_id = self.goals.create(text)
+        if goal_id is None:
+            return
+        strategy = self.task_engine.strategy_summary()
+        if strategy:
+            progress = f"Última execução: {strategy}. Resultado: {'sucesso' if self.task_engine.all_successful() else 'houve falha em uma ou mais etapas'}."
+        else:
+            progress = "Etapa de análise/resposta concluída; objetivo permanece ativo para continuidade."
+        self.goals.update(goal_id, progress)
+
     def ask(self, text: str) -> str:
         self.task_engine.reset()
         tool_descriptions = TOOL_DESCRIPTIONS + (
@@ -176,6 +202,7 @@ class SuperCerebro:
             reason = "Todas as etapas terminaram com sucesso." if not failures else "; ".join(f"{step.tool}: {step.result[:180]}" for step in failures)
             self.learning.record_experience(text, strategy, success, reason)
 
+        self._update_goals(text, answer)
         self.messages = messages + [{"role": "assistant", "content": answer}]
         self.memory.add("user", text)
         self.memory.add("assistant", answer)
