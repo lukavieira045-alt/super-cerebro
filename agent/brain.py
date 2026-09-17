@@ -31,6 +31,9 @@ VIREONIX_URL = "https://vireonix.ai/v1/chat/completions"
 MODEL = "auto"
 MAX_TOOL_STEPS = 8
 VIREONIX_RETRIES = 2
+MAX_CONTEXT_CHARS = 60_000
+MAX_TOOL_RESULT_CHARS = 30_000
+MAX_FINAL_INPUT_CHARS = 20_000
 
 
 class SuperCerebro:
@@ -52,6 +55,28 @@ class SuperCerebro:
 
     def health_check(self) -> HealthReport:
         return run_health_checks(self.memory.db_path)
+
+    @staticmethod
+    def _clip(text: str, limit: int) -> str:
+        value = str(text)
+        if len(value) <= limit:
+            return value
+        return value[:limit] + "\n[conteúdo truncado para preservar o contexto do modelo]"
+
+    @classmethod
+    def _bounded_messages(cls, messages: list[dict[str, str]], limit: int = MAX_CONTEXT_CHARS) -> list[dict[str, str]]:
+        total = 0
+        bounded: list[dict[str, str]] = []
+        for message in messages:
+            role = str(message.get("role", "system"))
+            content = str(message.get("content", ""))
+            remaining = limit - total
+            if remaining <= 0:
+                break
+            content = cls._clip(content, remaining)
+            bounded.append({"role": role, "content": content})
+            total += len(content)
+        return bounded
 
     def _build_context(self, text: str) -> list[dict[str, str]]:
         recent = self.memory.recent(limit=12)
@@ -96,13 +121,14 @@ class SuperCerebro:
             context.append({"role": "system", "content": facts_context})
         context.extend(recent)
         context.append({"role": "user", "content": text})
-        return context
+        return self._bounded_messages(context)
 
     def _call_vireonix(self, messages: list[dict[str, str]]) -> str:
         last_error: Exception | None = None
+        safe_messages = self._bounded_messages(messages)
         for attempt in range(VIREONIX_RETRIES + 1):
             try:
-                response = requests.post(VIREONIX_URL, headers={"Content-Type": "application/json"}, json={"model": MODEL, "messages": messages}, timeout=self.timeout)
+                response = requests.post(VIREONIX_URL, headers={"Content-Type": "application/json"}, json={"model": MODEL, "messages": safe_messages}, timeout=self.timeout)
                 response.raise_for_status()
                 try:
                     payload = response.json()
@@ -187,9 +213,9 @@ class SuperCerebro:
 
     def _verify_final(self, messages: list[dict[str, str]], answer: str) -> str:
         trace = self.task_engine.trace_text()
-        verification = ("VERIFICAÇÃO FINAL DA TAREFA.\nRevise a resposta usando somente o histórico e resultados das ferramentas. Corrija afirmações sem suporte, contradições, cálculos errados e conclusões sem evidência. Não invente dados. Entregue diretamente a resposta final.\n\n" f"ETAPAS EXECUTADAS:\n{trace}\n\nRESPOSTA A REVISAR:\n{answer}")
+        verification = ("VERIFICAÇÃO FINAL DA TAREFA.\nRevise a resposta usando somente o histórico e resultados das ferramentas. Corrija afirmações sem suporte, contradições, cálculos errados e conclusões sem evidência. Não invente dados. Entregue diretamente a resposta final.\n\n" f"ETAPAS EXECUTADAS:\n{trace}\n\nRESPOSTA A REVISAR:\n{self._clip(answer, MAX_FINAL_INPUT_CHARS)}")
         try:
-            checked = self._call_vireonix(messages + [{"role": "system", "content": verification}])
+            checked = self._call_vireonix(self._bounded_messages(messages + [{"role": "system", "content": verification}]))
             return checked.strip() or answer
         except RuntimeError:
             return answer
@@ -198,7 +224,7 @@ class SuperCerebro:
         quick = local_check(question, answer, bool(self.task_engine.steps))
         if quick.needs_revision:
             try:
-                revised = self._call_vireonix(messages + [{"role": "system", "content": revision_instruction(quick)}])
+                revised = self._call_vireonix(self._bounded_messages(messages + [{"role": "system", "content": revision_instruction(quick)}]))
                 answer = revised.strip() or answer
             except RuntimeError:
                 pass
@@ -209,7 +235,7 @@ class SuperCerebro:
         if not evaluation.needs_revision:
             return answer
         try:
-            revised = self._call_vireonix(messages + [{"role": "assistant", "content": answer}, {"role": "system", "content": revision_instruction(evaluation)}])
+            revised = self._call_vireonix(self._bounded_messages(messages + [{"role": "assistant", "content": self._clip(answer, MAX_FINAL_INPUT_CHARS)}, {"role": "system", "content": revision_instruction(evaluation)}]))
             return revised.strip() or answer
         except RuntimeError:
             return answer
@@ -227,21 +253,18 @@ class SuperCerebro:
     def _calibrate(self, question: str, answer: str) -> str:
         confidence = estimate(answer, len(self.task_engine.steps), self._research_verified)
         try:
-            calibrated = self._call_vireonix([{"role": "system", "content": "Você calibra a linguagem de uma resposta sem alterar fatos sustentados."}, {"role": "user", "content": f"Pergunta: {question}\n\nResposta:\n{answer}\n\n{confidence_prompt(confidence)}\nReescreva somente se necessário para que o grau de certeza da linguagem seja proporcional às evidências."}])
+            calibrated = self._call_vireonix([{"role": "system", "content": "Você calibra a linguagem de uma resposta sem alterar fatos sustentados."}, {"role": "user", "content": f"Pergunta: {self._clip(question, MAX_FINAL_INPUT_CHARS)}\n\nResposta:\n{self._clip(answer, MAX_FINAL_INPUT_CHARS)}\n\n{confidence_prompt(confidence)}\nReescreva somente se necessário para que o grau de certeza da linguagem seja proporcional às evidências."}])
             return calibrated.strip() or answer
         except RuntimeError:
             return answer
 
     def _update_goals(self, text: str, answer: str) -> None:
-        # Encerramento exige intenção explícita. Se houve falha operacional,
-        # mantemos o objetivo ativo para que ele possa ser retomado depois.
         if self.goals.is_explicit_completion(text):
             if self.task_engine.steps and not self.task_engine.all_successful():
                 return
             completed = self.goals.complete_active(text, "Concluído após a verificação da tarefa.")
             if completed is not None:
                 return
-
         plan = make_plan(text)
         related = self.goals.active_for(text, limit=1)
         goal_id = int(related[0]["id"]) if related else None
@@ -257,7 +280,7 @@ class SuperCerebro:
         self.task_engine.reset()
         self._research_verified = False
         tool_descriptions = TOOL_DESCRIPTIONS + ('\n- deep_research: pesquisa várias fontes e reúne conteúdo para comparação. Argumentos: {"query":"tema a investigar","sources":4}\n\nPara tarefas complexas, siga o plano inicial, mas ajuste-o conforme os resultados. Depois de cada ferramenta, verifique se a próxima etapa é necessária. Em modo autônomo, continue executando etapas úteis até concluir ou atingir o limite.')
-        messages: list[dict[str, str]] = [{"role": "system", "content": build_system_prompt(tool_descriptions)}, *self._build_context(text)]
+        messages: list[dict[str, str]] = self._bounded_messages([{"role": "system", "content": build_system_prompt(tool_descriptions)}, *self._build_context(text)])
         answer = self._call_vireonix(messages)
         for _ in range(MAX_TOOL_STEPS):
             request = self._parse_tool_request(answer)
@@ -266,7 +289,8 @@ class SuperCerebro:
             tool = request["tool"]
             arguments = request["arguments"]
             if self.task_engine.has_repeated_request(tool, arguments):
-                messages.extend([{"role": "assistant", "content": answer}, {"role": "system", "content": f"A ferramenta {tool} com esses mesmos argumentos já foi executada. Não repita a mesma etapa. Escolha uma etapa diferente, use o resultado existente ou conclua a tarefa."}])
+                messages.extend([{"role": "assistant", "content": self._clip(answer, MAX_FINAL_INPUT_CHARS)}, {"role": "system", "content": f"A ferramenta {tool} com esses mesmos argumentos já foi executada. Não repita a mesma etapa. Escolha uma etapa diferente, use o resultado existente ou conclua a tarefa."}])
+                messages = self._bounded_messages(messages)
                 answer = self._call_vireonix(messages)
                 continue
             result = self.task_engine.execute(tool, arguments, self._run_tool)
@@ -274,7 +298,11 @@ class SuperCerebro:
                 self._remember_sources(result, arguments.get("query", text))
                 evidence = self._verify_research(result)
                 result = result + "\n\nVERIFICAÇÃO DAS EVIDÊNCIAS:\n" + evidence
-            messages.extend([{"role": "assistant", "content": answer}, {"role": "system", "content": f"Resultado da ferramenta {tool}:\n{result}\n\nHistórico:\n{self.task_engine.trace_text()}\n\nContinue seguindo ou ajustando o plano. Verifique o resultado antes da próxima etapa."}])
+            messages.extend([
+                {"role": "assistant", "content": self._clip(answer, MAX_FINAL_INPUT_CHARS)},
+                {"role": "system", "content": f"Resultado da ferramenta {tool}:\n{self._clip(result, MAX_TOOL_RESULT_CHARS)}\n\nHistórico:\n{self.task_engine.trace_text()}\n\nContinue seguindo ou ajustando o plano. Verifique o resultado antes da próxima etapa."},
+            ])
+            messages = self._bounded_messages(messages)
             answer = self._call_vireonix(messages)
 
         if self.task_engine.steps:
@@ -297,7 +325,3 @@ class SuperCerebro:
         self._extract_knowledge(text, answer)
         self.memory.retain()
         return answer
-
-
-def build_agent() -> SuperCerebro:
-    return SuperCerebro()
