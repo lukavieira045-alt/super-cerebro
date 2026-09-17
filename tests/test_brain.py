@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 
+import requests
+
 from agent.brain import SuperCerebro
-from agent.memory import Memory
 from agent.learning import Learning
+from agent.memory import Memory
 
 
 class FakeBrain(SuperCerebro):
@@ -39,6 +41,14 @@ class FakeBrain(SuperCerebro):
 
     def _calibrate(self, question, answer):
         return answer
+
+
+def _response(payload=None, status=200):
+    response = requests.Response()
+    response.status_code = status
+    response.url = "https://vireonix.ai/v1/chat/completions"
+    response._content = json.dumps(payload or {"choices": [{"message": {"content": "OK"}}]}).encode()
+    return response
 
 
 def test_brain_simple_question_persists_memory(tmp_path):
@@ -98,3 +108,60 @@ def test_brain_evaluator_failure_is_non_fatal(tmp_path, monkeypatch):
     answer = brain.ask("Pergunta simples")
 
     assert answer == "Resposta que deve continuar disponível."
+
+
+def test_vireonix_retries_connection_error_then_succeeds(monkeypatch, tmp_path):
+    brain = SuperCerebro(timeout=3, memory=Memory(tmp_path / "memory.db"))
+    calls = []
+
+    def fake_post(*args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) < 3:
+            raise requests.ConnectionError("rede temporariamente indisponível")
+        return _response()
+
+    monkeypatch.setattr("agent.brain.requests.post", fake_post)
+    monkeypatch.setattr("agent.brain.time.sleep", lambda _: None)
+
+    assert brain._call_vireonix([{"role": "user", "content": "teste"}]) == "OK"
+    assert len(calls) == 3
+    assert all(call["timeout"] == 3 for call in calls)
+
+
+def test_vireonix_retries_transient_http_error(monkeypatch, tmp_path):
+    brain = SuperCerebro(memory=Memory(tmp_path / "memory.db"))
+    calls = []
+
+    def fake_post(*args, **kwargs):
+        calls.append(1)
+        if len(calls) < 2:
+            response = _response({"error": "temporário"}, status=503)
+            raise requests.HTTPError("503", response=response)
+        return _response()
+
+    monkeypatch.setattr("agent.brain.requests.post", fake_post)
+    monkeypatch.setattr("agent.brain.time.sleep", lambda _: None)
+
+    assert brain._call_vireonix([{"role": "user", "content": "teste"}]) == "OK"
+    assert len(calls) == 2
+
+
+def test_vireonix_invalid_response_is_controlled_and_not_retried(monkeypatch, tmp_path):
+    brain = SuperCerebro(memory=Memory(tmp_path / "memory.db"))
+    calls = []
+
+    def fake_post(*args, **kwargs):
+        calls.append(1)
+        return _response({"choices": []})
+
+    monkeypatch.setattr("agent.brain.requests.post", fake_post)
+    monkeypatch.setattr("agent.brain.time.sleep", lambda _: None)
+
+    try:
+        brain._call_vireonix([{"role": "user", "content": "teste"}])
+    except RuntimeError as exc:
+        assert "Resposta inválida do Vireonix" in str(exc)
+    else:
+        raise AssertionError("A resposta inválida deveria gerar RuntimeError")
+
+    assert len(calls) == 1
