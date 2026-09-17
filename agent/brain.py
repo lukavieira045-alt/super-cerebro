@@ -8,6 +8,7 @@ import requests
 from .intelligence import build_system_prompt
 from .learning import Learning
 from .memory import Memory
+from .planner import format_plan, make_plan
 from .research import deep_research
 from .task_engine import TaskEngine
 from .tools import TOOL_DESCRIPTIONS, execute_tool
@@ -18,7 +19,7 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + aprendizado + ferramentas + orquestração."""
+    """Vireonix + memória + planejamento + aprendizado + ferramentas."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
@@ -32,15 +33,16 @@ class SuperCerebro:
         relevant = self.memory.relevant(text, limit=6)
         facts = self.memory.relevant_facts(text, limit=8)
         learned = self.learning.context(text, limit=5)
+        plan = make_plan(text)
         seen = {(item["role"], item["content"]) for item in recent}
         relevant_unique = [item for item in relevant if (item["role"], item["content"]) not in seen]
-        context: list[dict[str, str]] = []
+        context: list[dict[str, str]] = [{"role": "system", "content": format_plan(plan)}]
         if facts:
             context.append({"role": "system", "content": "Memórias de longo prazo confirmadas:\n" + "\n".join(f"[{item['category']}] {item['fact']}" for item in facts)})
         if learned:
             context.append({
                 "role": "system",
-                "content": learned + "\nUse essas experiências como referência, não como verdade absoluta. Reavalie tudo na tarefa atual; uma falha anterior é um alerta, não uma regra."
+                "content": learned + "\nUse essas experiências como referência, não como verdade absoluta. Reavalie tudo na tarefa atual."
             })
         if relevant_unique:
             context.append({"role": "system", "content": "Conversas anteriores relevantes:\n" + "\n".join(f"{item['role']}: {item['content']}" for item in relevant_unique)})
@@ -107,15 +109,13 @@ class SuperCerebro:
             return
 
     def _verify_final(self, messages: list[dict[str, str]], answer: str) -> str:
-        """Pede ao próprio Vireonix uma revisão final baseada nas evidências."""
         trace = self.task_engine.trace_text()
         verification = (
             "VERIFICAÇÃO FINAL DA TAREFA.\n"
-            "Revise a resposta abaixo usando somente o histórico e os resultados das ferramentas. "
-            "Corrija afirmações sem suporte, contradições, cálculos errados e conclusões que não seguem das evidências. "
-            "Não invente dados ausentes. Entregue diretamente a resposta final ao usuário, sem falar sobre esta revisão.\n\n"
-            f"ETAPAS EXECUTADAS:\n{trace}\n\n"
-            f"RESPOSTA A REVISAR:\n{answer}"
+            "Revise a resposta usando somente o histórico e resultados das ferramentas. "
+            "Corrija afirmações sem suporte, contradições, cálculos errados e conclusões sem evidência. "
+            "Não invente dados. Entregue diretamente a resposta final.\n\n"
+            f"ETAPAS EXECUTADAS:\n{trace}\n\nRESPOSTA A REVISAR:\n{answer}"
         )
         try:
             checked = self._call_vireonix(messages + [{"role": "system", "content": verification}])
@@ -124,13 +124,12 @@ class SuperCerebro:
             return answer
 
     def ask(self, text: str) -> str:
-        """Resolve tarefas, reutilizando experiências e verificando a resposta final."""
         self.task_engine.reset()
         tool_descriptions = TOOL_DESCRIPTIONS + (
-            '\n- deep_research: pesquisa várias fontes, abre as fontes encontradas e reúne o conteúdo para comparação. '
+            '\n- deep_research: pesquisa várias fontes e reúne conteúdo para comparação. '
             'Argumentos: {"query":"tema a investigar","sources":4}'
-            '\n\nPara tarefas complexas, encadeie várias ferramentas quando necessário. Depois de cada resultado, '
-            'analise se a próxima etapa é necessária. Não repita uma ferramenta sem motivo.'
+            '\n\nPara tarefas complexas, siga o plano inicial, mas ajuste-o conforme os resultados. '
+            'Depois de cada ferramenta, verifique se a próxima etapa é necessária.'
         )
         messages: list[dict[str, str]] = [
             {"role": "system", "content": build_system_prompt(tool_descriptions)},
@@ -147,7 +146,7 @@ class SuperCerebro:
             result = self.task_engine.execute(tool, arguments, self._run_tool)
             messages.extend([
                 {"role": "assistant", "content": answer},
-                {"role": "system", "content": f"Resultado da ferramenta {tool}:\n{result}\n\nHistórico das etapas:\n{self.task_engine.trace_text()}\n\nAgora continue a tarefa. Verifique o resultado antes de decidir a próxima etapa. Se outra ferramenta for necessária, use o JSON exigido; caso contrário, responda ao usuário."},
+                {"role": "system", "content": f"Resultado da ferramenta {tool}:\n{result}\n\nHistórico:\n{self.task_engine.trace_text()}\n\nContinue seguindo ou ajustando o plano. Verifique o resultado antes da próxima etapa."},
             ])
             answer = self._call_vireonix(messages)
 
@@ -159,7 +158,7 @@ class SuperCerebro:
             success = self.task_engine.all_successful()
             self.learning.record(text, strategy, success)
             failures = [step for step in self.task_engine.steps if not step.ok]
-            reason = "Todas as etapas de ferramenta terminaram com sucesso." if not failures else "; ".join(
+            reason = "Todas as etapas terminaram com sucesso." if not failures else "; ".join(
                 f"{step.tool}: {step.result[:180]}" for step in failures
             )
             self.learning.record_experience(text, strategy, success, reason)
@@ -172,5 +171,4 @@ class SuperCerebro:
 
 
 def build_agent() -> SuperCerebro:
-    """Cria o núcleo do Super Cérebro."""
     return SuperCerebro()
