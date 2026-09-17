@@ -200,6 +200,7 @@ class SuperCerebro:
         self.memory.add("user", text)
         self.memory.add("assistant", answer)
         self._extract_facts(text, answer)
+        self.memory.retain()
         return answer
 
 
