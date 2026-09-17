@@ -38,7 +38,10 @@ class SuperCerebro:
         if facts:
             context.append({"role": "system", "content": "Memórias de longo prazo confirmadas:\n" + "\n".join(f"[{item['category']}] {item['fact']}" for item in facts)})
         if learned:
-            context.append({"role": "system", "content": learned + "\nUse essas estratégias como referência, não como verdade absoluta. Verifique se continuam adequadas à tarefa atual."})
+            context.append({
+                "role": "system",
+                "content": learned + "\nUse essas experiências como referência, não como verdade absoluta. Reavalie tudo na tarefa atual; uma falha anterior é um alerta, não uma regra."
+            })
         if relevant_unique:
             context.append({"role": "system", "content": "Conversas anteriores relevantes:\n" + "\n".join(f"{item['role']}: {item['content']}" for item in relevant_unique)})
         context.extend(recent)
@@ -121,7 +124,7 @@ class SuperCerebro:
             return answer
 
     def ask(self, text: str) -> str:
-        """Resolve tarefas, reutilizando estratégias aprendidas e verificando a resposta final."""
+        """Resolve tarefas, reutilizando experiências e verificando a resposta final."""
         self.task_engine.reset()
         tool_descriptions = TOOL_DESCRIPTIONS + (
             '\n- deep_research: pesquisa várias fontes, abre as fontes encontradas e reúne o conteúdo para comparação. '
@@ -153,7 +156,13 @@ class SuperCerebro:
 
         strategy = self.task_engine.strategy_summary()
         if strategy:
-            self.learning.record(text, strategy, self.task_engine.all_successful())
+            success = self.task_engine.all_successful()
+            self.learning.record(text, strategy, success)
+            failures = [step for step in self.task_engine.steps if not step.ok]
+            reason = "Todas as etapas de ferramenta terminaram com sucesso." if not failures else "; ".join(
+                f"{step.tool}: {step.result[:180]}" for step in failures
+            )
+            self.learning.record_experience(text, strategy, success, reason)
 
         self.messages = messages + [{"role": "assistant", "content": answer}]
         self.memory.add("user", text)
