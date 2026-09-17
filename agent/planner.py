@@ -17,8 +17,8 @@ class Plan:
 _COMPLEX_MARKERS = {
     "pesquise", "pesquisar", "investigue", "investigar", "compare", "comparar",
     "analise", "analisar", "crie", "criar", "desenvolva", "desenvolver",
-    "implemente", "implementar", "corrija", "corrigir", "explique", "explicar",
-    "encontre", "encontrar", "verifique", "verificar", "configure", "configurar",
+    "implemente", "implementar", "corrija", "corrigir", "encontre", "encontrar",
+    "configure", "configurar",
 }
 
 
