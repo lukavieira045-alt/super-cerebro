@@ -7,6 +7,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from .source_reliability import score
+
 
 class SourceMemory:
     """Guarda fontes usadas em pesquisas para permitir rastreabilidade futura."""
@@ -47,7 +49,9 @@ class SourceMemory:
         summary = self._clean(summary, 1000)
         if not query or not url:
             return
+        structural = score(url, title, summary)
         confidence = max(0.0, min(1.0, float(confidence)))
+        confidence = round((confidence + structural.score) / 2, 2)
         with self._connect() as db:
             db.execute("""INSERT INTO source_memory (query, url, title, summary, confidence)
                 VALUES (?, ?, ?, ?, ?)
@@ -70,8 +74,8 @@ class SourceMemory:
             overlap = sum(1 for term in terms if term in haystack)
             if not overlap:
                 continue
-            score = overlap * 3 + float(item['confidence']) + min(2.0, item['uses'] * 0.1)
-            ranked.append((score, item))
+            score_value = overlap * 3 + float(item['confidence']) + min(2.0, item['uses'] * 0.1)
+            ranked.append((score_value, item))
         ranked.sort(key=lambda pair: pair[0], reverse=True)
         return [item for _, item in ranked[:max(1, limit)]]
 
@@ -82,8 +86,8 @@ class SourceMemory:
         lines = ["FONTES CONHECIDAS RELEVANTES:"]
         for item in items:
             label = item["title"] or item["url"]
-            lines.append(f"- {label} | {item['url']} | confiança registrada: {item['confidence']:.2f}")
+            lines.append(f"- {label} | {item['url']} | confiança estrutural registrada: {item['confidence']:.2f}")
             if item["summary"]:
                 lines.append(f"  Resumo: {item['summary']}")
-        lines.append("Fontes antigas são pistas, não prova de atualidade. Confirme informações sensíveis ao tempo.")
+        lines.append("A pontuação é apenas um sinal estrutural. Não trate domínio ou pontuação como prova automática. Fontes antigas são pistas e informações sensíveis ao tempo devem ser confirmadas.")
         return "\n".join(lines)
