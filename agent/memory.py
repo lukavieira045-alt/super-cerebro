@@ -87,8 +87,7 @@ class Memory:
             if score > 0:
                 scored.append((score, int(row["id"]), item))
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        selected = [item for _, _, item in scored[:limit]]
-        return list(reversed(selected))
+        return list(reversed([item for _, _, item in scored[:limit]]))
 
     def remember_fact(self, category: str, fact: str, importance: int = 2) -> None:
         fact = fact.strip()
@@ -120,6 +119,22 @@ class Memory:
                 scored.append((score, int(item["importance"]), item))
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
         return [item for _, _, item in scored[:limit]]
+
+    def memory_context(self, text: str, limit: int = 8) -> str:
+        """Monta um contexto compacto, priorizando fatos e lembranças relevantes."""
+        facts = self.relevant_facts(text, limit=limit)
+        memories = self.relevant(text, limit=limit)
+        parts: list[str] = []
+        if facts:
+            parts.append("FATOS RELEVANTES:\n" + "\n".join(
+                f"- [{item['category']}] {item['fact']} (importância {item['importance']})"
+                for item in facts
+            ))
+        if memories:
+            parts.append("LEMBRANÇAS RELEVANTES:\n" + "\n".join(
+                f"- {item['role']}: {item['content']}" for item in memories
+            ))
+        return "\n\n".join(parts)
 
     def clear(self) -> None:
         with self._connect() as db:
