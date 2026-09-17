@@ -123,8 +123,6 @@ class Learning:
             if similarity > 0 or self._normalize(task_type) == item["task_type"]:
                 success_rate = self._success_rate(item)
                 rate_bonus = (success_rate - 0.5) * 4.0
-                # A quantidade de usos é informativa, mas não deve superar a taxa
-                # real de sucesso. A evidência histórica é o sinal principal.
                 evidence_bonus = min(0.5, item["uses"] * 0.02)
                 ranked.append((similarity * 10 + rate_bonus + evidence_bonus, item))
         ranked.sort(key=lambda pair: pair[0], reverse=True)
@@ -136,6 +134,7 @@ class Learning:
         ranked = []
         for row in rows:
             item = dict(row)
+            item["success"] = bool(item["success"])
             similarity = self._similarity(task_type, item["task_type"])
             if similarity > 0:
                 ranked.append((similarity * 10 + (1.5 if item["success"] else 0), item))
@@ -149,7 +148,7 @@ class Learning:
     def avoid_strategies(self, task_type: str, limit: int = 3) -> list[dict[str, Any]]:
         """Retorna caminhos que falharam para o agente evitar repetir cegamente."""
         experiences = self.relevant_experiences(task_type, limit * 3)
-        return [item for item in experiences if not item["success"]][:limit]
+        return [item for item in experiences if item["success"] is False][:limit]
 
     def context(self, task_type: str, limit: int = 5) -> str:
         items = self.relevant(task_type, limit)
