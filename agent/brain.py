@@ -7,6 +7,7 @@ import requests
 
 from .autonomy import build_autonomy_context
 from .evaluator import judge_with_vireonix, local_check, revision_instruction
+from .evidence import verify_with_model
 from .goals import Goals
 from .intelligence import build_system_prompt
 from .learning import Learning
@@ -23,7 +24,7 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + objetivos + autonomia + aprendizado + autoaperfeiçoamento."""
+    """Vireonix + memória + objetivos + autonomia + aprendizado + autoaperfeiçoamento + evidências."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
@@ -123,6 +124,12 @@ class SuperCerebro:
         except RuntimeError:
             return answer
 
+    def _verify_research(self, research: str) -> str:
+        try:
+            return verify_with_model(research, self._call_vireonix)
+        except RuntimeError:
+            return research
+
     def _update_goals(self, text: str, answer: str) -> None:
         plan = make_plan(text)
         related = self.goals.active_for(text, limit=1)
@@ -147,6 +154,9 @@ class SuperCerebro:
             tool = request["tool"]
             arguments = request["arguments"]
             result = self.task_engine.execute(tool, arguments, self._run_tool)
+            if tool == "deep_research" and result:
+                evidence = self._verify_research(result)
+                result = result + "\n\nVERIFICAÇÃO DAS EVIDÊNCIAS:\n" + evidence
             messages.extend([{ "role": "assistant", "content": answer}, {"role": "system", "content": f"Resultado da ferramenta {tool}:\n{result}\n\nHistórico:\n{self.task_engine.trace_text()}\n\nContinue seguindo ou ajustando o plano. Verifique o resultado antes da próxima etapa."}])
             answer = self._call_vireonix(messages)
 
