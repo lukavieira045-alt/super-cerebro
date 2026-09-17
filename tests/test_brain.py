@@ -31,6 +31,9 @@ class FakeBrain(SuperCerebro):
     def _extract_knowledge(self, user_text, answer):
         return None
 
+    def _verify_final(self, messages, answer):
+        return answer
+
     def _quality_check(self, messages, question, answer):
         return answer
 
