@@ -1,3 +1,4 @@
+import ipaddress
 import pytest
 
 from agent.tools import MAX_REDIRECTS, open_webpage
@@ -33,10 +34,14 @@ def test_redirect_to_private_address_is_rejected(monkeypatch):
         calls.append((url, kwargs))
         return FakeResponse(302, {"location": "http://127.0.0.1/admin"})
 
-    monkeypatch.setattr("agent.tools.requests.get", fake_get)
-    monkeypatch.setattr("agent.tools.socket.getaddrinfo", lambda *args, **kwargs: [(0, 0, 0, "", ("93.184.216.34", 0))])
+    def fake_addrinfo(host, *args, **kwargs):
+        address = "127.0.0.1" if host == "127.0.0.1" else "93.184.216.34"
+        return [(0, 0, 0, "", (address, 0))]
 
-    with pytest.raises(ValueError, match="privado"):
+    monkeypatch.setattr("agent.tools.requests.get", fake_get)
+    monkeypatch.setattr("agent.tools.socket.getaddrinfo", fake_addrinfo)
+
+    with pytest.raises(ValueError, match="privado|reservado"):
         open_webpage("https://example.com")
 
     assert len(calls) == 1
