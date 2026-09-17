@@ -15,28 +15,24 @@ def bound_messages(messages: list[Mapping[str, str]], limit: int, clip) -> list[
     if not normalized:
         return []
 
-    first_index = 0
-    last_index = len(normalized) - 1
-    first = normalized[first_index]
-    last = normalized[last_index]
-
-    if first_index == last_index:
+    first = normalized[0]
+    last = normalized[-1]
+    if len(normalized) == 1:
         return [{"role": first["role"], "content": clip(first["content"], limit)}]
 
-    first_budget = min(len(first["content"]), limit)
-    first_content = clip(first["content"], first_budget)
+    first_content = clip(first["content"], min(len(first["content"]), limit))
     remaining = limit - len(first_content)
     if remaining <= 0:
         return [{"role": first["role"], "content": first_content}]
 
-    # Reserve space for the current user/request message whenever possible.
-    last_budget = min(len(last["content"],), remaining) if False else min(len(last["content"]), remaining)
+    # Reserve espaço para a mensagem atual, priorizando-a sobre contexto antigo.
+    last_budget = min(len(last["content"]), remaining)
     last_content = clip(last["content"], last_budget)
     remaining -= len(last_content)
 
     middle: list[dict[str, str]] = []
-    if remaining > 0 and last_index > 1:
-        for message in reversed(normalized[1:last_index]):
+    if remaining > 0:
+        for message in reversed(normalized[1:-1]):
             if remaining <= 0:
                 break
             budget = min(len(message["content"]), remaining)
