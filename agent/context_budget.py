@@ -20,12 +20,12 @@ def bound_messages(messages: list[Mapping[str, str]], limit: int, clip) -> list[
     if len(normalized) == 1:
         return [{"role": first["role"], "content": clip(first["content"], limit)}]
 
-    first_content = clip(first["content"], min(len(first["content"]), limit))
+    # Sempre reserva uma parte do orçamento para a mensagem atual.
+    last_reserve = min(len(last["content"]), max(1, limit // 4))
+    first_budget = max(0, limit - last_reserve)
+    first_content = clip(first["content"], first_budget)
     remaining = limit - len(first_content)
-    if remaining <= 0:
-        return [{"role": first["role"], "content": first_content}]
 
-    # Reserve espaço para a mensagem atual, priorizando-a sobre contexto antigo.
     last_budget = min(len(last["content"]), remaining)
     last_content = clip(last["content"], last_budget)
     remaining -= len(last_content)
@@ -41,7 +41,10 @@ def bound_messages(messages: list[Mapping[str, str]], limit: int, clip) -> list[
             remaining -= len(content)
         middle.reverse()
 
-    result = [{"role": first["role"], "content": first_content}]
+    result: list[dict[str, str]] = []
+    if first_content:
+        result.append({"role": first["role"], "content": first_content})
     result.extend(middle)
-    result.append({"role": last["role"], "content": last_content})
+    if last_content:
+        result.append({"role": last["role"], "content": last_content})
     return result
