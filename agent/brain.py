@@ -218,9 +218,6 @@ class SuperCerebro:
         try:
             verified = verify_with_model(research, self._call_vireonix)
             report = inspect_research(research)
-            # A resposta do Vireonix é uma análise da evidência, mas só marcamos
-            # a pesquisa como "verificada" quando a estrutura também sustenta isso:
-            # pelo menos duas fontes utilizáveis e nenhum conflito estrutural.
             self._research_verified = report.reliable_enough
             return verified
         except RuntimeError:
@@ -236,6 +233,15 @@ class SuperCerebro:
             return answer
 
     def _update_goals(self, text: str, answer: str) -> None:
+        # Encerramento exige intenção explícita. Se houve falha operacional,
+        # mantemos o objetivo ativo para que ele possa ser retomado depois.
+        if self.goals.is_explicit_completion(text):
+            if self.task_engine.steps and not self.task_engine.all_successful():
+                return
+            completed = self.goals.complete_active(text, "Concluído após a verificação da tarefa.")
+            if completed is not None:
+                return
+
         plan = make_plan(text)
         related = self.goals.active_for(text, limit=1)
         goal_id = int(related[0]["id"]) if related else None
