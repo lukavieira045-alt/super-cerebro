@@ -149,9 +149,26 @@ class SuperCerebro:
             return None
         return data
 
+    def _complete_goal(self, arguments: dict) -> str:
+        """Conclui um objetivo somente após uma execução sem falhas."""
+        try:
+            goal_id = int(arguments.get("goal_id"))
+        except (TypeError, ValueError):
+            return "ERRO DA FERRAMENTA: goal_id inválido"
+        if not self.task_engine.steps or not self.task_engine.all_successful():
+            return "ERRO DA FERRAMENTA: o objetivo não pode ser concluído antes de haver uma execução com todas as etapas bem-sucedidas"
+        active = {int(goal["id"]): goal for goal in self.goals.active(20)}
+        if goal_id not in active:
+            return "ERRO DA FERRAMENTA: objetivo ativo não encontrado"
+        progress = str(arguments.get("progress", "Objetivo concluído após verificação das etapas.")).strip()
+        self.goals.complete(goal_id, progress or "Objetivo concluído após verificação das etapas.")
+        return f"Objetivo #{goal_id} concluído com sucesso."
+
     def _run_tool(self, tool: str, arguments: dict) -> str:
         if tool == "deep_research":
             return deep_research(arguments.get("query", ""), arguments.get("sources", 4))
+        if tool == "complete_goal":
+            return self._complete_goal(arguments)
         return execute_tool(tool, arguments)
 
     def _extract_facts(self, user_text: str, answer: str) -> None:
@@ -256,7 +273,7 @@ class SuperCerebro:
     def ask(self, text: str) -> str:
         self.task_engine.reset()
         self._research_verified = False
-        tool_descriptions = TOOL_DESCRIPTIONS + ('\n- deep_research: pesquisa várias fontes e reúne conteúdo para comparação. Argumentos: {"query":"tema a investigar","sources":4}\n\nPara tarefas complexas, siga o plano inicial, mas ajuste-o conforme os resultados. Depois de cada ferramenta, verifique se a próxima etapa é necessária. Em modo autônomo, continue executando etapas úteis até concluir ou atingir o limite.')
+        tool_descriptions = TOOL_DESCRIPTIONS + ('\n- deep_research: pesquisa várias fontes e reúne conteúdo para comparação. Argumentos: {"query":"tema a investigar","sources":4}\n- complete_goal: conclui um objetivo persistente somente depois de uma execução bem-sucedida. Argumentos: {"goal_id":123,"progress":"resultado verificado"}\n\nPara tarefas complexas, siga o plano inicial, mas ajuste-o conforme os resultados. Depois de cada ferramenta, verifique se a próxima etapa é necessária. Só use complete_goal quando houver evidência de que o objetivo foi realmente cumprido. Em modo autônomo, continue executando etapas úteis até concluir ou atingir o limite.')
         messages: list[dict[str, str]] = [{"role": "system", "content": build_system_prompt(tool_descriptions)}, *self._build_context(text)]
         answer = self._call_vireonix(messages)
         for _ in range(MAX_TOOL_STEPS):
