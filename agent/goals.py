@@ -45,6 +45,18 @@ class Goals:
         """Cria sinais simples para reconhecer pequenas variações morfológicas em português."""
         return {word[:6] for word in words if len(word) >= 6}
 
+    @staticmethod
+    def is_explicit_completion(text: str) -> bool:
+        """Reconhece somente comandos claros de encerramento, evitando conclusão automática ambígua."""
+        normalized = re.sub(r"\s+", " ", str(text).strip().lower())
+        patterns = (
+            r"\bobjetivo\s+(?:est[aá]|foi)\s+conclu[ií]d[oa]\b",
+            r"\bobjetivo\s+conclu[ií]d[oa]\b",
+            r"\b(?:pode|vamos)\s+(?:finalizar|encerrar|concluir)\s+(?:esse|este|o)\s+objetivo\b",
+            r"\b(?:finalize|encerre|conclua)\s+(?:esse|este|o)\s+objetivo\b",
+        )
+        return any(re.search(pattern, normalized) for pattern in patterns)
+
     def create(self, title: str) -> int:
         title = self._normalize(title)
         if not title:
@@ -79,6 +91,20 @@ class Goals:
 
     def complete(self, goal_id: int, progress: str = "Concluído.") -> None:
         self.update(goal_id, progress, "completed")
+
+    def complete_active(self, text: str, progress: str = "Concluído.") -> int | None:
+        """Conclui o objetivo ativo relacionado à mensagem, somente com comando explícito."""
+        if not self.is_explicit_completion(text):
+            return None
+        related = self.active_for(text, limit=1)
+        if not related:
+            active = self.active(limit=1)
+            related = active[:1]
+        if not related:
+            return None
+        goal_id = int(related[0]["id"])
+        self.complete(goal_id, progress)
+        return goal_id
 
     def context(self, limit: int = 5) -> str:
         goals = self.active(limit)
