@@ -20,6 +20,7 @@ from .research import deep_research
 from .self_improvement import SelfImprovement
 from .semantic_memory import expand_query
 from .task_engine import TaskEngine
+from .temporal_memory import TemporalMemory
 from .tools import TOOL_DESCRIPTIONS, execute_tool
 
 VIREONIX_URL = "https://vireonix.ai/v1/chat/completions"
@@ -28,7 +29,7 @@ MAX_TOOL_STEPS = 8
 
 
 class SuperCerebro:
-    """Vireonix + memória + experiências + grafo + objetivos + autonomia + aprendizado + evidências."""
+    """Vireonix + memória + experiências + grafo + tempo + objetivos + autonomia + aprendizado."""
 
     def __init__(self, timeout: int = 120, memory: Memory | None = None, learning: Learning | None = None) -> None:
         self.timeout = timeout
@@ -36,6 +37,7 @@ class SuperCerebro:
         self.learning = learning or Learning(self.memory.db_path)
         self.experiences = ExperienceMemory(self.memory.db_path)
         self.knowledge = KnowledgeGraph(self.memory.db_path)
+        self.temporal = TemporalMemory(self.memory.db_path)
         self.goals = Goals(self.memory.db_path)
         self.improvement = SelfImprovement(self.learning)
         self.messages: list[dict[str, str]] = []
@@ -52,6 +54,7 @@ class SuperCerebro:
         learned = self.learning.context(text, limit=5)
         experience_context = self.experiences.context(text, limit=5)
         knowledge_context = self.knowledge.context(text, limit=8)
+        temporal_context = self.temporal.context(text, limit=6)
         goal_context = self.goals.context(limit=5)
         related_goals = self.goals.active_for(text, limit=3)
         plan = make_plan(text)
@@ -71,6 +74,8 @@ class SuperCerebro:
             context.append({"role": "system", "content": experience_context})
         if knowledge_context:
             context.append({"role": "system", "content": knowledge_context})
+        if temporal_context:
+            context.append({"role": "system", "content": temporal_context})
         context.extend(recent)
         context.append({"role": "user", "content": text})
         return context
@@ -124,6 +129,7 @@ class SuperCerebro:
             for item in edges[:8]:
                 if isinstance(item, dict) and item.get("subject") and item.get("relation") and item.get("object"):
                     self.knowledge.add(str(item["subject"]), str(item["relation"]), str(item["object"]), float(item.get("confidence", 0.7)))
+                    self.temporal.record(str(item["subject"]), f"{item['relation']} = {item['object']}", float(item.get("confidence", 0.7)))
         except (RuntimeError, KeyError, IndexError, TypeError, ValueError):
             return
 
