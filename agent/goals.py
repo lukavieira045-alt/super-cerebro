@@ -36,9 +36,20 @@ class Goals:
     def _normalize(text: str) -> str:
         return re.sub(r"\s+", " ", str(text).strip())[:500]
 
-    @staticmethod
-    def _words(text: str) -> set[str]:
-        return {w.lower() for w in re.findall(r"[\wÀ-ÿ]+", str(text)) if len(w) >= 4}
+    _GENERIC_TERMS = {
+        "analisar", "analise", "análise", "criar", "crie", "corrigir", "corrija",
+        "desenvolver", "desenvolva", "explicar", "explique", "encontrar", "encontre",
+        "pesquisar", "pesquise", "pesquisa", "verificar", "verifique", "verificação",
+        "objetivo", "tarefa", "fazer", "faça", "continuar", "continue",
+    }
+
+    @classmethod
+    def _words(cls, text: str) -> set[str]:
+        return {
+            w.lower()
+            for w in re.findall(r"[\wÀ-ÿ]+", str(text))
+            if len(w) >= 4 and w.lower() not in cls._GENERIC_TERMS
+        }
 
     @staticmethod
     def _stems(words: set[str]) -> set[str]:
