@@ -7,7 +7,7 @@ function enterChatMode(){document.body.classList.add('chat-mode');chat.classList
 function addMessage(role,text){enterChatMode();const row=document.createElement('div');row.className=`message-row ${role}`;const box=document.createElement('div');box.className='bubble';const label=document.createElement('div');label.className='message-label';label.textContent=role==='user'?'Você':'Super Cérebro';const content=document.createElement('div');content.textContent=text;box.append(label,content);row.appendChild(box);chat.appendChild(row);requestAnimationFrame(()=>row.scrollIntoView({behavior:'smooth',block:'end'}))}
 function setTyping(on){typing.innerHTML=on?'<span class="typing"><i></i><i></i><i></i></span>':''}
 function cleanSpeechText(text){return String(text||'').replace(/\\([^)]*\\)/g,' ').replace(/\[[^\]]*\]/g,' ').replace(/\*+/g,' ').replace(/_+/g,' ').replace(/#{1,6}\s*/g,' ').replace(/^[>\-+]\s+/gm,' ').replace(/`+/g,' ').replace(/https?:\/\/\S+/g,' ').replace(/\s{2,}/g,' ').trim()}
-let localTTS=null,localTTSLoading=null,ttsAudioContext=null,ttsSource=null;
+let localTTS=null,localTTSLoading=null,ttsAudioContext=null,ttsSource=null,ttsElement=null;
 const TTS_MODEL='onnx-community/Supertonic-TTS-2-ONNX';
 const TTS_VOICE='https://huggingface.co/onnx-community/Supertonic-TTS-2-ONNX/resolve/main/voices/M1.bin';
 async function loadLocalMaleTTS(){
@@ -27,12 +27,13 @@ async function loadLocalMaleTTS(){
   try{return await localTTSLoading}
   finally{localTTSLoading=null}
 }
+function prepareAudioElement(){if(!ttsElement){ttsElement=new Audio();ttsElement.preload='auto';ttsElement.playsInline=true;ttsElement.volume=1;document.body.appendChild(ttsElement)}return ttsElement}
 function prepareAudioContext(){
   if(!ttsAudioContext)ttsAudioContext=new (window.AudioContext||window.webkitAudioContext)();
   if(ttsAudioContext.state==='suspended')ttsAudioContext.resume().catch(()=>{});
   return ttsAudioContext
 }
-function primeAudio(){try{const ctx=prepareAudioContext();if(ctx.state==='suspended')ctx.resume().catch(()=>{});}catch(e){console.warn('AudioContext:',e)}}
+function primeAudio(){try{const ctx=prepareAudioContext();ctx.resume().catch(()=>{});const a=prepareAudioElement();a.volume=1;}catch(e){console.warn('AudioContext:',e)}}
 function audioBlobFromOutput(output){
   if(output?.toBlob)return output.toBlob();
   const data=output?.audio;
@@ -53,14 +54,26 @@ async function speakAnswer(text){
     const tts=await loadLocalMaleTTS();
     const output=await tts('<pt>'+clean+'</pt>',{speaker_embeddings:TTS_VOICE,num_inference_steps:5,speed:1.02});
     const blob=audioBlobFromOutput(output);
+    const url=URL.createObjectURL(blob);
+    const audio=prepareAudioElement();
+    audio.pause();
+    audio.src=url;
+    audio.currentTime=0;
+    audio.onended=()=>{URL.revokeObjectURL(url);setBrainState('')};
+    try{
+      await audio.play();
+      return;
+    }catch(mediaError){
+      console.warn('HTMLAudio bloqueado, tentando WebAudio:',mediaError);
+    }
     const ctx=prepareAudioContext();
+    await ctx.resume();
     const buffer=await ctx.decodeAudioData(await blob.arrayBuffer());
     if(ttsSource){try{ttsSource.stop()}catch{}}
     ttsSource=ctx.createBufferSource();
     ttsSource.buffer=buffer;
     ttsSource.connect(ctx.destination);
     ttsSource.onended=()=>{if(ttsSource?.buffer===buffer)setBrainState('')};
-    await ctx.resume();
     ttsSource.start(0);
   }catch(e){
     console.error('TTS local masculino falhou:',e);
