@@ -1,0 +1,1 @@
+(()=>{const img=document.querySelector('.robot-img');if(!img)return;img.src='./robot-live.webp?v=20260918-28';img.alt='Humanoide futurista animado';img.style.cursor='pointer';})();
