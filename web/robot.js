@@ -1,2 +1,1 @@
-(()=>{
-const AVATAR='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0i
+(()=>{const img=document.querySelector('.robot-img');if(!img)return;const stage=document.getElementById('brainStage');img.addEventListener('click',()=>{stage?.classList.add('listening');try{window.speakAnswer?.('Olá. Estou aqui. Como posso ajudar você?')}finally{setTimeout(()=>stage?.classList.remove('listening'),1800)}});img.style.cursor='pointer';})();
