@@ -1,18 +1,20 @@
 window.SuperCerebroCognitive={version:'1.0',modes:{general:'general',code:'code',research:'research',planning:'planning',creative:'creative',analysis:'analysis'},classify(text){const t=(text||'').toLowerCase();if(/\b(código|codigo|javascript|html|css|python|bug|erro|programa|github|api)\b/.test(t))return this.modes.code;if(/\b(pesquis|fonte|compare|atual|notícia|noticia|internet)\b/.test(t))return this.modes.research;if(/\b(plano|planejar|etapas|projeto|estratégia|estrategia)\b/.test(t))return this.modes.planning;if(/\b(crie|criar|escreva|roteiro|ideia|design)\b/.test(t))return this.modes.creative;if(/\b(analis|calcule|cálculo|calculo|dados|compare)\b/.test(t))return this.modes.analysis;return this.modes.general},buildSystem(userText){const mode=this.classify(userText);const rules={general:'Responda com precisão, contexto e linguagem natural. Se faltar informação essencial, deixe isso claro.',code:'Atue como engenheiro de software. Preserve o que já funciona, identifique causa antes de alterar e forneça soluções verificáveis.',research:'Diferencie conhecimento de hipótese. Quando pesquisa ou fonte for necessária, use ferramentas disponíveis e indique incertezas.',planning:'Converta o objetivo em etapas concretas, dependências, riscos e critérios de conclusão.',creative:'Priorize qualidade, coerência, originalidade e aderência ao pedido.',analysis:'Quebre o problema em variáveis, evidências, cálculos e conclusões verificáveis.'};return `Você é o Super Cérebro, operando sobre o núcleo Vireonix. Modo atual: ${mode}. PRINCÍPIOS: compreenda a intenção; raciocine internamente sem expor cadeia privada; não invente dados, fontes ou capacidades; revise a resposta procurando contradições e erros; em tarefas complexas, planeje antes de executar; preserve sistemas funcionais e altere somente o necessário; declare incertezas relevantes; entregue primeiro o resultado útil. ORIENTAÇÃO: ${rules[mode]} PEDIDO: ${userText}`},context(messages){return messages.slice(-30)},review(answer){return typeof answer==='string'?answer.trim():answer}};
 
 (function(){
-  const base=window.SuperCerebroCognitive||{};
-  const oldBuild=base.buildSystem;
+  const base=window.SuperCerebroCognitive;
+  const originalClassify=base.classify.bind(base);
+  const originalBuild=base.buildSystem.bind(base);
   base.modes=Object.assign({},base.modes,{engineering:'engineering'});
   base.classify=function(text){
     const t=String(text||'').toLowerCase();
     if(/\b(cod|program|programa|javascript|html|css|python|java|app|aplicativo|aplicação|site|website|jogo|game|api|github|supabase|deploy|instal|terminal|android|apk|bug|erro|debug|engenharia|desenvolv)/.test(t)) return 'engineering';
-    return oldBuild?((oldBuild.call(base,text).match(/Modo atual:\s*(\\w+)/)||[])[1]||'general'):'general';
+    return originalClassify(text);
   };
   const engineeringRules='MODO ENGENHARIA: quando a tarefa envolver programação, código, instalação, configuração, desenvolvimento ou construção de aplicativo, jogo, site, API ou sistema, acompanhe a pessoa como um engenheiro instrutor. Explique o objetivo antes de executar. Divida o trabalho em etapas pequenas e numeradas. Para cada etapa, explique exatamente onde abrir, o que instalar, qual arquivo criar ou alterar, onde colar o código, como salvar, como executar e como verificar o resultado. Não pule pré-requisitos. Considere que a pessoa pode estar no celular e dê instruções adaptadas para Android quando isso for relevante. Depois de cada etapa, diga o que a pessoa deve observar e qual erro comum pode aparecer. Em instalações, explique dependências, permissões, comandos, caminhos e como confirmar que a instalação funcionou. Em código, explique o que cada parte importante faz, mas entregue o código completo quando for necessário. Em construção de apps, jogos e sites, acompanhe o projeto do início ao teste final e explique também como corrigir erros encontrados. Nunca diga apenas faça isso: conduza passo a passo.';
   base.buildSystem=function(userText){
-    const result=oldBuild?oldBuild.call(base,userText):'Você é o Super Cérebro. Responda em português do Brasil.';
-    return /engenharia|engineering/i.test(this.classify(userText)) ? result+'\\n\\n'+engineeringRules : result;
+    const mode=this.classify(userText);
+    const result=originalBuild(userText);
+    return mode==='engineering' ? result+'\n\n'+engineeringRules : result;
   };
   window.SuperCerebroCognitive=base;
 })();
