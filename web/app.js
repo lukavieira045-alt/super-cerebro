@@ -77,10 +77,22 @@ async function speakAnswer(text){
     ttsSource.start(0);
   }catch(e){
     console.error('TTS local masculino falhou:',e);
-    setBrainState('');
+    try{await speakBrowserFallback(clean);return}catch(fallbackError){console.error('Fallback de voz falhou:',fallbackError);setBrainState('')}
   }
 }
-function getVoiceDebug(){return{engine:'Supertonic 2 local',voice:'M1 masculino',model:TTS_MODEL,loaded:!!localTTS}}
+function speakBrowserFallback(text){
+  return new Promise((resolve,reject)=>{
+    const clean=cleanSpeechText(text); if(!clean||!('speechSynthesis' in window)){reject(new Error('Voz do navegador indisponível'));return}
+    const u=new SpeechSynthesisUtterance(clean);u.lang='pt-BR';u.rate=.98;u.pitch=.82;u.volume=1;
+    const voices=speechSynthesis.getVoices();
+    const preferred=voices.find(v=>/pt-BR|Portuguese|Brasil/i.test(v.lang)&&/male|mascul|homem|Daniel|Felipe|Luciano|Ricardo/i.test(v.name))
+      ||voices.find(v=>/pt-BR/i.test(v.lang))||voices.find(v=>/pt/i.test(v.lang));
+    if(preferred)u.voice=preferred;
+    u.onstart=()=>setBrainState('speaking');u.onend=()=>{setBrainState('');resolve()};u.onerror=e=>{setBrainState('');reject(e)};
+    speechSynthesis.cancel();speechSynthesis.speak(u);
+  });
+}
+function getVoiceDebug(){return{engine:'Supertonic 2 local + fallback',voice:'M1 masculino / pt-BR',model:TTS_MODEL,loaded:!!localTTS}}
 async function callVireonix(value,extraContext=''){const userText=extraContext?`${value}\n\n${extraContext}`:value;const messages=[{role:'system',content:cognitiveSystem(userText)},...history,{role:'user',content:userText}];let lastError='Falha de conexão com o Vireonix.';for(let attempt=0;attempt<3;attempt++){try{const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),60000);let r;try{r=await fetch(GATEWAY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'auto',messages}),signal:controller.signal,cache:'no-store'})}finally{clearTimeout(timer)}const raw=await r.text();let d={};try{d=raw?JSON.parse(raw):{}}catch{}if(!r.ok){lastError=`Gateway HTTP ${r.status}: ${d?.error?.message||d?.error?.type||raw||'erro'}`;if((r.status===429||r.status>=500)&&attempt<2){await new Promise(x=>setTimeout(x,1200*(attempt+1)));continue}throw new Error(lastError)}const answer=d?.choices?.[0]?.message?.content||d?.content||d?.result;if(typeof answer!=='string'||!answer.trim())throw new Error('O Vireonix respondeu sem conteúdo.');return answer.trim()}catch(e){lastError=e?.name==='AbortError'?'A conexão demorou mais de 60 segundos para responder.':e?.message||lastError;if(attempt<2)await new Promise(x=>setTimeout(x,1200*(attempt+1)))}}throw new Error(lastError)}
 function loadTesseract(){if(window.Tesseract)return Promise.resolve(window.Tesseract);if(tesseractPromise)return tesseractPromise;tesseractPromise=new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';s.async=true;s.onload=()=>window.Tesseract?resolve(window.Tesseract):reject(new Error('O leitor OCR não carregou.'));s.onerror=()=>reject(new Error('Não foi possível carregar o leitor OCR. Verifique a conexão e tente novamente.'));document.head.appendChild(s)});return tesseractPromise}
 async function prepareImage(file){const bitmap=await createImageBitmap(file);const max=2400,scale=Math.min(1,max/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();const img=ctx.getImageData(0,0,canvas.width,canvas.height),d=img.data;for(let i=0;i<d.length;i+=4){const y=.299*d[i]+.587*d[i+1]+.114*d[i+2];const v=y<150?Math.max(0,y-12):Math.min(255,y+10);d[i]=d[i+1]=d[i+2]=v}ctx.putImageData(img,0,0);return canvas}
